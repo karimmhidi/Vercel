@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/sage-proxy.js": {
+      "maxDuration": 60
+    }
+  }
+}

@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared Services Tools BETA</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --navy:#16324F; --navy-light:#1F4468; --teal:#0F6E56; --teal-light:#E1F5EE;
+    --bg:#F5F6F8; --card:#FFFFFF; --border:#E1E5E9; --text:#1B2430; --text-mut:#5B6572;
+    --amber:#854F0B; --amber-bg:#FAEEDA;
+    --red:#A32D2D; --red-bg:#FCEBEB;
+    --nat-bg:#F4EEFC; --nat-row:#FBF9FE; --nat-text:#4A3B85; --nat-border:#D9CCF2;
+    --client-bg:#E9F3FB; --client-text:#1B5C93;
+    --ola-blue:#003B71; --ola-orange:#F5821F;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--text);
+  }
+  .mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;}
+
+  /* ---- Login gate ---- */
+  #loginScreen{
+    position:fixed; inset:0; z-index:1000; padding:20px;
+    display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 20% 20%, #1F4468 0%, var(--navy) 45%, #0B2338 100%);
+    overflow:hidden;
+  }
+  #loginScreen::before, #loginScreen::after{
+    content:''; position:absolute; border-radius:50%; filter:blur(60px); opacity:.35; pointer-events:none;
+  }
+  #loginScreen::before{width:420px; height:420px; background:var(--ola-orange); top:-120px; right:-100px;}
+  #loginScreen::after{width:380px; height:380px; background:var(--teal); bottom:-140px; left:-100px;}
+  .loginBrand{position:relative; text-align:center; margin-bottom:22px;}
+  .loginBrand .sst-badge svg{filter:drop-shadow(0 6px 14px rgba(0,0,0,.3));}
+  .loginBrand .ola{margin-top:10px; opacity:.9;}
+  .loginBox{
+    position:relative; background:#fff; border-radius:16px; padding:34px 32px; width:100%; max-width:352px;
+    box-shadow:0 24px 60px rgba(0,0,0,.35); animation:loginPop .35s ease-out;
+  }
+  @keyframes loginPop{ from{opacity:0; transform:translateY(10px) scale(.98);} to{opacity:1; transform:none;} }
+  .loginBox h1{margin:0 0 4px; font-size:18px; color:var(--navy); font-weight:600;}
+  .loginBox p{margin:0 0 22px; font-size:13px; color:var(--text-mut);}
+  .loginBox label{display:block; font-size:12.5px; color:var(--text-mut); margin-bottom:5px; font-weight:600;}
+  .loginBox input{
+    width:100%; padding:11px 13px; border:1px solid var(--border); border-radius:8px;
+    font-size:14px; margin-bottom:14px; font-family:inherit; transition:border-color .15s, box-shadow .15s;
+  }
+  .loginBox input:focus{outline:none; border-color:var(--teal); box-shadow:0 0 0 3px var(--teal-light);}
+  .loginBox button{
+    width:100%; background:var(--teal); color:#fff; border:none; padding:12px; border-radius:8px;
+    font-size:14px; font-weight:600; cursor:pointer; transition:background .15s, transform .1s;
+  }
+  .loginBox button:hover{background:#0C5A46;}
+  .loginBox button:active{transform:scale(.98);}
+  .loginError{color:var(--red); font-size:12.5px; margin:-6px 0 14px; display:none;}
+  #appRoot{display:none;}
+
+  header{background:linear-gradient(135deg,var(--navy),var(--navy-light)); color:#fff; padding:26px 32px;}
+  header h1{margin:0; font-size:20px; font-weight:600; letter-spacing:.2px;}
+  header p{margin:6px 0 0; font-size:13px; color:#C3D0DD;}
+  .wrap{max-width:1120px; margin:0 auto; padding:24px 20px 60px;}
+  .card{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px 24px; margin-bottom:18px; box-shadow:0 1px 2px rgba(20,30,45,.04);}
+  .card h2{font-size:14px; margin:0 0 14px; color:var(--navy); font-weight:600; display:flex; align-items:center; gap:8px;}
+  .card h2 .num{
+    display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
+    background:var(--teal); color:#fff; border-radius:50%; font-size:11px; font-weight:700;
+  }
+
+  #dropzone{
+    border:2px dashed var(--border); border-radius:10px; padding:30px 20px; text-align:center;
+    color:var(--text-mut); cursor:pointer; transition:border-color .15s, background .15s;
+  }
+  #dropzone.drag{border-color:var(--teal); background:var(--teal-light);}
+  #dropzone strong{color:var(--navy);}
+  #fileInput{display:none;}
+
+  .filechips{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px;}
+  .chip{
+    display:flex; align-items:center; gap:8px; background:var(--bg); border:1px solid var(--border);
+    border-radius:20px; padding:6px 8px 6px 14px; font-size:12.5px;
+  }
+  .chip .cnt{color:var(--text-mut);}
+  .chip button{
+    background:none; border:none; cursor:pointer; color:var(--text-mut); font-size:14px;
+    width:20px; height:20px; border-radius:50%; line-height:1;
+  }
+  .chip button:hover{background:var(--red-bg); color:var(--red);}
+
+  .statbar{display:flex; gap:10px; flex-wrap:wrap; margin-top:16px;}
+  .statpill{flex:1; min-width:120px; background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:10px 14px;}
+  .statpill .n{font-size:19px; font-weight:700; color:var(--navy);}
+  .statpill .l{font-size:11.5px; color:var(--text-mut); margin-top:2px;}
+
+  .searchrow{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+  .searchbox{position:relative; flex:1; min-width:220px;}
+  .searchbox svg{position:absolute; left:14px; top:50%; transform:translateY(-50%); pointer-events:none;}
+  #q, #refQ{
+    width:100%; padding:12px 16px 12px 40px; border:1.5px solid var(--border); border-radius:24px;
+    font-size:14px; font-family:inherit; background:#fff; transition:border-color .15s, box-shadow .15s;
+  }
+  #q:focus, #refQ:focus{outline:none; border-color:var(--teal); box-shadow:0 0 0 4px var(--teal-light);}
+  .toggle{display:flex; align-items:center; gap:7px; font-size:13px; color:var(--text-mut); white-space:nowrap;}
+  button.primary{
+    background:var(--teal); color:#fff; border:none; padding:11px 20px; border-radius:8px;
+    font-size:14px; font-weight:600; cursor:pointer;
+  }
+  button.primary:hover{background:#0C5A46;}
+  button.ghost{
+    background:none; border:1px solid var(--border); color:var(--text-mut); padding:10px 14px;
+    border-radius:8px; font-size:13px; cursor:pointer;
+  }
+  button.ghost:hover{border-color:var(--text-mut); color:var(--text);}
+  button.addcrit{
+    background:none; border:1px dashed var(--border); color:var(--teal); padding:8px 14px;
+    border-radius:8px; font-size:12.5px; cursor:pointer; font-weight:600;
+  }
+  button.addcrit:hover{border-color:var(--teal); background:var(--teal-light);}
+
+  .extraFilters{display:flex; flex-direction:column; gap:8px; margin-top:12px;}
+  .filterRow{display:flex; gap:8px; align-items:center;}
+  .filterRow select{
+    padding:9px 10px; border:1px solid var(--border); border-radius:7px; font-size:13px; background:#fff; color:var(--text);
+  }
+  .filterRow input{
+    flex:1; padding:9px 12px; border:1px solid var(--border); border-radius:7px; font-size:13px; font-family:inherit;
+  }
+  .filterRow input:focus, .filterRow select:focus{outline:none; border-color:var(--teal);}
+  .filterRow button{
+    background:none; border:none; cursor:pointer; color:var(--text-mut); font-size:15px;
+    width:26px; height:26px; border-radius:50%;
+  }
+  .filterRow button:hover{background:var(--red-bg); color:var(--red);}
+
+  .status{font-size:12.5px; color:var(--text-mut); margin-top:12px;}
+  .status b{color:var(--navy);}
+
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  thead th{
+    text-align:left; padding:10px 10px; border-bottom:1px solid var(--border); color:var(--text-mut);
+    font-weight:600; position:sticky; top:0; background:var(--card); font-size:11.5px; text-transform:uppercase; letter-spacing:.03em;
+  }
+  tbody td{padding:10px; border-bottom:1px solid var(--border);}
+  tbody tr:hover{background:var(--bg);}
+  tbody tr.national{background:var(--nat-row); border-left:3px solid var(--nat-border);}
+  tbody tr.national:hover{background:var(--nat-bg);}
+
+  .badge{display:inline-block; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600;}
+  .badge.active{background:var(--teal-light); color:#085041;}
+  .badge.inactive{background:var(--red-bg); color:var(--red);}
+  .badge.type-client{background:var(--client-bg); color:var(--client-text);}
+  .badge.type-national{background:var(--nat-bg); color:var(--nat-text);}
+  .tag{font-size:10.5px; color:var(--text-mut); background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:1px 6px;}
+  .empty{padding:40px 20px; text-align:center; color:var(--text-mut); font-size:13.5px;}
+  .empty b{display:block; color:var(--navy); font-size:14.5px; margin-bottom:4px; font-weight:600;}
+  .tablewrap{max-height:520px; overflow:auto; border:1px solid var(--border); border-radius:10px; margin-top:14px;}
+  .resultcount{font-size:13px; color:var(--text-mut); margin-top:16px;}
+
+  .cifgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; margin-top:6px;}
+  .cifcard{border:1px solid var(--border); border-radius:10px; padding:14px 16px; background:linear-gradient(180deg,#fff,var(--bg));}
+  .cifcard .lbl{font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-mut); font-weight:700; margin-bottom:6px;}
+  .cifcard .id{font-size:16px; font-weight:700; color:var(--navy);}
+  .cifcard .sub{font-size:11.5px; color:var(--text-mut); margin-top:4px;}
+  .cifcard.prepaid{background:linear-gradient(180deg,#fff,var(--amber-bg));}
+  .cifcard.prepaid .id{color:var(--amber);}
+  .cif-file-title{font-size:12.5px; font-weight:700; color:var(--navy); margin:14px 0 8px; padding-top:10px; border-top:1px solid var(--border);}
+  .cif-file-title:first-child{margin-top:0; padding-top:0; border-top:none;}
+  .cif-file-title .tag{margin-left:6px;}
+
+  .tplgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px;}
+  .tplgrid label{display:block; font-size:11.5px; color:var(--text-mut); font-weight:700; margin-bottom:5px; text-transform:uppercase; letter-spacing:.02em;}
+  .tplgrid input{
+    width:100%; padding:9px 11px; border:1px solid var(--border); border-radius:7px; font-size:13px; font-family:inherit;
+  }
+  .tplgrid input:focus{outline:none; border-color:var(--teal);}
+  .tplPreviewWrap{margin-top:20px; border-top:1px solid var(--border); padding-top:16px;}
+  .tplPreviewLabel{font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-mut); font-weight:700; margin-bottom:8px;}
+  .tplPreview{background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:16px 18px; font-size:13.5px;}
+  .tplPreview table{width:100%; border-collapse:collapse; margin-top:10px;}
+  .tplPreview table th, .tplPreview table td{border:1px solid var(--border); padding:7px 10px; font-size:12.5px; text-align:left;}
+  .tplPreview table th{background:#fff; font-weight:700;}
+
+  footer{text-align:center; padding:24px 20px 40px; font-size:12px; color:var(--text-mut);}
+  footer .heart{color:var(--red);}
+
+  .navbar{
+    display:flex; align-items:center; justify-content:space-between; gap:20px;
+    background:linear-gradient(135deg,var(--navy),var(--navy-light));
+    padding:12px 32px; border-bottom:3px solid var(--ola-orange);
+    flex-wrap:wrap;
+  }
+  .brandgroup{display:flex; align-items:center; gap:14px;}
+  .brandgroup .divider{width:1px; height:30px; background:rgba(255,255,255,.25);}
+  .sst-badge{flex-shrink:0;}
+  .sst-text{display:flex; flex-direction:column; line-height:1.15;}
+  .sst-text .t1{color:#fff; font-size:13.5px; font-weight:700; letter-spacing:.02em;}
+  .sst-text .t2{color:var(--teal-light); font-size:10px; font-weight:700; letter-spacing:.08em;}
+
+  .tabbar{display:flex; gap:6px;}
+  .tabbtn{
+    display:flex; align-items:center; gap:7px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); color:#C3D0DD;
+    padding:10px 18px; border-radius:9px; font-size:13.5px; font-weight:600; cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s;
+  }
+  .tabbtn:hover{color:#fff; background:rgba(255,255,255,.13);}
+  .tabbtn.active{color:#fff; background:var(--teal); border-color:var(--teal);}
+  .tabpane{display:none;}
+  .tabpane.active{display:block;}
+
+  .subbar{background:#fff; border-bottom:1px solid var(--border); padding:10px 32px; font-size:12.5px; color:var(--text-mut);}
+
+  .kpirow{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:18px;}
+  .kpicard{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; box-shadow:0 1px 2px rgba(20,30,45,.04);}
+  .kpicard .kn{font-size:24px; font-weight:700; color:var(--navy);}
+  .kpicard .kl{font-size:11.5px; color:var(--text-mut); margin-top:4px; font-weight:600; text-transform:uppercase; letter-spacing:.02em;}
+  .kpicard .ks{font-size:11px; color:var(--text-mut); margin-top:2px;}
+  .kpicard.accent-teal .kn{color:var(--teal);}
+  .kpicard.accent-red .kn{color:var(--red);}
+  .kpicard.accent-amber .kn{color:var(--amber);}
+  .kpicard.accent-purple .kn{color:var(--nat-text);}
+
+  .chartgrid{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  @media (max-width:760px){ .chartgrid{grid-template-columns:1fr;} }
+
+  .folderRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;}
+  button.folderBtn{
+    flex:1; min-width:200px; background:var(--bg); border:1px solid var(--border); color:var(--navy);
+    padding:11px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  button.folderBtn:hover{border-color:var(--teal); background:var(--teal-light);}
+  button.folderBtn .folderPath{font-weight:400; color:var(--text-mut); font-size:11.5px;}
+  .foldernote{font-size:11.5px; color:var(--text-mut); margin-top:8px;}
+
+  /* ---- Live affiliate picker ---- */
+  .affgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px; margin:12px 0;}
+  .affitem{
+    display:flex; align-items:center; gap:8px; background:var(--bg); border:1px solid var(--border);
+    border-radius:8px; padding:8px 12px; font-size:12.5px; cursor:pointer; user-select:none;
+  }
+  .affitem:hover{border-color:var(--teal);}
+  .affitem input{margin:0; flex-shrink:0;}
+  .affitem .code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; color:var(--text-mut); font-size:11px;}
+  .loadActions{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:6px;}
+  .loadActions .spacer{flex:1;}
+  .liveDot{display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--teal); margin-right:6px; box-shadow:0 0 0 3px var(--teal-light);}
+  .liveDot.off{background:#B7BFC8; box-shadow:none;}
+  .progressbar{height:6px; border-radius:4px; background:var(--bg); border:1px solid var(--border); overflow:hidden; margin-top:12px; display:none;}
+  .progressbar .fill{height:100%; width:0%; background:var(--teal); transition:width .2s ease;}
+  .lastSync{font-size:11.5px; color:var(--text-mut); margin-top:6px;}
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div>
+    <div class="loginBrand">
+      <svg width="52" height="52" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-label="Shared Services Tools" class="sst-badge">
+        <circle cx="20" cy="20" r="19" fill="var(--teal)"/>
+        <line x1="20" y1="10" x2="12" y2="26" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <line x1="20" y1="10" x2="28" y2="26" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <line x1="12" y1="26" x2="28" y2="26" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="20" cy="10" r="4" fill="#fff"/>
+        <circle cx="12" cy="26" r="4" fill="var(--ola-orange)"/>
+        <circle cx="28" cy="26" r="4" fill="#fff"/>
+      </svg>
+      <div class="ola">
+        <svg width="118" height="34" viewBox="0 0 118 34" xmlns="http://www.w3.org/2000/svg" aria-label="OLA Energy" style="margin:8px auto 0;">
+          <text x="0" y="16" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="16" font-weight="800" fill="#fff" letter-spacing="0.5">OLA</text>
+          <text x="0" y="30" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" font-weight="700" fill="var(--ola-orange)" letter-spacing="2">ENERGY</text>
+          <rect x="0" y="19" width="118" height="2.5" rx="1.25" fill="var(--ola-orange)"/>
+        </svg>
+      </div>
+    </div>
+    <div class="loginBox">
+      <h1>Shared Services Tools <span style="color:var(--teal); font-weight:700;">BETA</span></h1>
+      <p>Please sign in to continue</p>
+      <label for="loginUser">Username</label>
+      <input type="text" id="loginUser" autocomplete="username" placeholder="Username">
+      <label for="loginPass">Password</label>
+      <input type="password" id="loginPass" autocomplete="current-password" placeholder="Password">
+      <div class="loginError" id="loginError">Incorrect username or password.</div>
+      <button id="loginBtn">Log in</button>
+    </div>
+  </div>
+</div>
+
+<div id="appRoot">
+
+<div class="navbar">
+  <div class="brandgroup">
+    <!-- OLA Energy wordmark — original interpretation using their public brand colors (blue = quality, orange = energy, with a route line), not a reproduction of the registered mark -->
+    <svg width="118" height="34" viewBox="0 0 118 34" xmlns="http://www.w3.org/2000/svg" aria-label="OLA Energy">
+      <text x="0" y="16" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="16" font-weight="800" fill="#fff" letter-spacing="0.5">OLA</text>
+      <text x="0" y="30" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" font-weight="700" fill="var(--ola-orange)" letter-spacing="2">ENERGY</text>
+      <rect x="0" y="19" width="118" height="2.5" rx="1.25" fill="var(--ola-orange)"/>
+    </svg>
+    <div class="divider"></div>
+    <div class="sst-badge">
+      <!-- Shared Services Tools — original mark: three linked nodes forming a service triangle -->
+      <svg width="34" height="34" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-label="Shared Services Tools">
+        <circle cx="20" cy="20" r="19" fill="var(--teal)"/>
+        <line x1="20" y1="10" x2="12" y2="26" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <line x1="20" y1="10" x2="28" y2="26" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <line x1="12" y1="26" x2="28" y2="26" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="20" cy="10" r="4" fill="#fff"/>
+        <circle cx="12" cy="26" r="4" fill="var(--ola-orange)"/>
+        <circle cx="28" cy="26" r="4" fill="#fff"/>
+      </svg>
+    </div>
+    <div class="sst-text">
+      <span class="t1">Shared Services Tools</span>
+      <span class="t2">BETA</span>
+    </div>
+  </div>
+  <div class="tabbar">
+    <button class="tabbtn active" data-tab="search">🔍 Search</button>
+    <button class="tabbtn" data-tab="dashboard">📊 Dashboard</button>
+    <button class="tabbtn" data-tab="reference">📖 Reference</button>
+  </div>
+</div>
+<div class="subbar">
+  <span class="liveDot" id="liveDot"></span><span id="liveDotLabel">Connecting to Sage 300…</span> — search live by CUSTCC, LOCATION, name or account, no manual extract needed
+</div>
+
+<div class="wrap">
+
+<div id="tab-search" class="tabpane active">
+
+  <div class="card">
+    <h2><span class="num">1</span>Live data source — Sage 300</h2>
+    <div class="foldernote" style="margin-bottom:10px;">Data is pulled live from Sage 300 (Web API) for each affiliate — no monthly extract to load or upload. Nothing loads automatically: check the affiliate(s) you need below, then click "Load data". Use Refresh any time to pull the latest data straight from Sage.</div>
+    <div class="affgrid" id="affGrid"></div>
+    <div class="loadActions">
+      <button class="ghost" id="affSelectAll">Select all</button>
+      <button class="ghost" id="affSelectNone">Select none</button>
+      <span class="spacer"></span>
+      <button class="primary" id="loadDataBtn">⚡ Load data</button>
+      <button class="ghost" id="refreshDataBtn">🔄 Refresh</button>
+    </div>
+    <div class="progressbar" id="loadProgress"><div class="fill" id="loadProgressFill"></div></div>
+    <div class="status" id="loadStatus"></div>
+    <div class="lastSync" id="lastSync"></div>
+    <div class="filechips" id="filechips"></div>
+    <div class="statbar" id="statbar" style="display:none;"></div>
+  </div>
+
+  <div class="card" id="cifCard" style="display:none;">
+    <h2><span class="num">2</span>Last account created</h2>
+    <div id="cifContent"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">3</span>Search</h2>
+    <div class="searchrow">
+      <div class="searchbox">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A94A0" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
+        <input type="text" id="q" placeholder="CUSTCC, LOCATION, name or account… (comma = OR, e.g. RFA, RFE)">
+      </div>
+      <label class="toggle"><input type="checkbox" id="activeOnly" checked> Active only</label>
+      <button class="primary" id="searchBtn">Search</button>
+      <button class="ghost" id="resetBtn">Reset</button>
+    </div>
+
+    <div class="extraFilters" id="extraFilters"></div>
+    <button class="addcrit" id="addCritBtn" style="margin-top:10px;">+ Add a criterion</button>
+
+    <div class="resultcount" id="resultCount"></div>
+    <button class="ghost" id="exportBtn" style="display:none; margin-top:8px;">⬇ Export CSV</button>
+    <div class="tablewrap" id="tablewrap">
+      <div class="empty" id="emptyState">
+        <b>No data loaded yet</b>
+        Select at least one affiliate above and click "Load data" to start searching.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="tab-dashboard" class="tabpane">
+  <div class="card" id="dashEmptyCard">
+    <div class="empty"><b>No data yet</b>Load affiliate data on the Search tab to see the dashboard.</div>
+  </div>
+  <div id="dashContent" style="display:none;">
+    <div class="kpirow" id="kpiRow"></div>
+    <div class="chartgrid">
+      <div class="card">
+        <h2><span class="num">A</span>Retail vs Commercial</h2>
+        <canvas id="chartRetailComm" height="220"></canvas>
+      </div>
+      <div class="card">
+        <h2><span class="num">B</span>Status breakdown</h2>
+        <canvas id="chartStatus" height="220"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h2><span class="num">C</span>Accounts created — last 8 weeks</h2>
+      <canvas id="chartWeekly" height="140"></canvas>
+    </div>
+  </div>
+</div>
+
+<div id="tab-reference" class="tabpane">
+  <div class="card">
+    <h2><span class="num">i</span>Account type reference</h2>
+    <div class="foldernote" style="margin-bottom:10px;">Look up what a customer group / industry code means, or find the code for a category. Based on the prefix of the account ID (e.g. CIA, RFB, RSA…).</div>
+    <div class="searchrow">
+      <div class="searchbox">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A94A0" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
+        <input type="text" id="refQ" placeholder="Type a code (e.g. CIA) or a category name (e.g. Agriculture)…">
+      </div>
+    </div>
+    <div class="tablewrap" id="refResults" style="margin-top:14px;"></div>
+  </div>
+  <div class="card">
+    <h2><span class="num">ii</span>Currency codes</h2>
+    <table><thead><tr><th>Currency</th><th>Code</th></tr></thead><tbody id="currencyTableBody"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">iii</span>Account creation message</h2>
+    <div class="foldernote" style="margin-bottom:14px;">Fill in the fields below, then copy the ready-to-send message — it pastes as a formatted table into Outlook, Gmail, or Teams.</div>
+    <div class="tplgrid">
+      <div><label>Name</label><input type="text" id="tplName" placeholder="Agence Italienne pour la Coopération au Développement"></div>
+      <div><label>IDNAT</label><input type="text" id="tplIdnat" placeholder="CXX099906X"></div>
+      <div><label>CUSTCC</label><input type="text" id="tplCustcc" placeholder="CIG099906O"></div>
+      <div><label>LOCATION</label><input type="text" id="tplLocation" placeholder="3700F"></div>
+      <div><label>BRAVO CODE</label><input type="text" id="tplBravo" placeholder="LONECXX099906X"></div>
+    </div>
+    <button class="primary" id="copyTplBtn" style="margin-top:14px;">📋 Copy message</button>
+    <span id="copyTplStatus" style="margin-left:10px; font-size:12.5px; color:var(--teal); font-weight:600; display:none;">Copied!</span>
+
+    <div class="tplPreviewWrap">
+      <div class="tplPreviewLabel">Preview</div>
+      <div id="tplPreview" class="tplPreview"></div>
+    </div>
+  </div>
+</div>
+
+</div>
+<footer>Developed with <span class="heart">♥</span> by Karim Mhidi</footer>
+</div>
+
+<script>
+// ---- Login gate (client-side only — visual gate, not real security) ----
+const VALID_USER = 'admin';
+const VALID_PASS = 'admin';
+const loginScreen = document.getElementById('loginScreen');
+const appRoot = document.getElementById('appRoot');
+const loginError = document.getElementById('loginError');
+
+function attemptLogin(){
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  if(u === VALID_USER && p === VALID_PASS){
+    loginScreen.style.display = 'none';
+    appRoot.style.display = 'block';
+    initLiveData();
+  }else{
+    loginError.style.display = 'block';
+  }
+}
+document.getElementById('loginBtn').addEventListener('click', attemptLogin);
+document.getElementById('loginPass').addEventListener('keydown', e => { if(e.key === 'Enter') attemptLogin(); });
+document.getElementById('loginUser').addEventListener('keydown', e => { if(e.key === 'Enter') attemptLogin(); });
+
+// ---- Tab navigation ----
+document.querySelectorAll('.tabbtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabbtn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tabpane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+let allRecords = [];      // { id, name, active, custcc, custccDesc, location, locationDesc, type, source }
+let extraFilters = [];    // { id, field }
+let lastResults = [];     // currently displayed search results, for CSV export
+
+const filechips = document.getElementById('filechips');
+const loadStatus = document.getElementById('loadStatus');
+const statbar = document.getElementById('statbar');
+const tablewrap = document.getElementById('tablewrap');
+const emptyState = document.getElementById('emptyState');
+const resultCount = document.getElementById('resultCount');
+const cifCard = document.getElementById('cifCard');
+const cifContent = document.getElementById('cifContent');
+const extraFiltersEl = document.getElementById('extraFilters');
+const affGrid = document.getElementById('affGrid');
+const loadDataBtn = document.getElementById('loadDataBtn');
+const refreshDataBtn = document.getElementById('refreshDataBtn');
+const loadProgress = document.getElementById('loadProgress');
+const loadProgressFill = document.getElementById('loadProgressFill');
+const lastSyncEl = document.getElementById('lastSync');
+const liveDot = document.getElementById('liveDot');
+const liveDotLabel = document.getElementById('liveDotLabel');
+
+// =================================================================================
+// LIVE DATA LAYER — Sage 300 Web API, via the secure Netlify Function "sage-proxy".
+// The frontend never talks to Sage 300 directly (credentials stay server-side); it
+// only calls /api/sage-proxy?company=<CODE>&type=customers|national.
+// =================================================================================
+const PROXY_URL = '/api/sage-proxy';
+
+// Fallback affiliate list (used if the ?list=companies call fails, e.g. during local
+// preview without Netlify Functions running) — keep this in sync with sage-proxy.js.
+const FALLBACK_COMPANIES = [
+  {code:'BFDATA', name:"OLA Energy Burkina SA (Burkina-Faso)"},
+  {code:'CIDATA', name:"OLA Energy Côte d'Ivoire"},
+  {code:'EGDATA', name:"OLA Energy Misr Co. S.A.E. (Egypt)"},
+  {code:'GADATA', name:"OLA Energy Gabon S.A."},
+  {code:'LMA001', name:"OLA Energy Maroc SAS"},
+  {code:'LOCA',   name:"OLA Energy Cameroon"},
+  {code:'LOKDAT', name:"OLA Energy Kenya Limited"},
+  {code:'LTN001', name:"OLA Energy Tunisie"},
+  {code:'MLDATA', name:"OLA Energy Mali SA"},
+  {code:'NEDATA', name:"OLA Energy Niger"},
+  {code:'REDATA', name:"OLA Energy Réunion SAS"},
+  {code:'SNDATA', name:"OLA Energy Sénégal"},
+  {code:'TDDATA', name:"OLA Energy Chad S.A."},
+  {code:'UGDATA', name:"OLA Energy Uganda Limited"},
+  {code:'ERODAT', name:"Libya Oil Eritrea"},
+  {code:'ERTDAT', name:"Tamoil Malindi (Eritrea)"},
+  {code:'SDDATA', name:"Libya Oil Sudan Company Ltd."},
+];
+
+let COMPANIES = [];               // [{code, name}], populated from the proxy or the fallback above
+let AFFILIATE_NAMES = {};         // code -> display name, for table/CSV rendering
+let affiliatesLoaded = {};        // code -> { customers:n, national:n, error:string|null }
+
+async function loadCompanyList(){
+  try{
+    const res = await fetch(`${PROXY_URL}?list=companies`, {cache:'no-store'});
+    if(!res.ok) throw new Error('bad status ' + res.status);
+    const json = await res.json();
+    if(Array.isArray(json.companies) && json.companies.length) return json.companies;
+    throw new Error('empty list');
+  }catch(err){
+    console.warn('Could not load company list from proxy, using built-in fallback list.', err);
+    return FALLBACK_COMPANIES;
+  }
+}
+
+async function initLiveData(){
+  setLive(false, 'Connecting to Sage 300…');
+  COMPANIES = await loadCompanyList();
+  AFFILIATE_NAMES = Object.fromEntries(COMPANIES.map(c => [c.code, c.name]));
+  renderAffiliatePicker();
+  // Nothing loads automatically — pick the affiliate(s) you need below, then
+  // click "Load data". This keeps a single slow/stalled affiliate from blocking
+  // everything else, and avoids pulling data you don't need right now.
+  setLive(false, 'Ready — pick affiliate(s) and click "Load data"');
+}
+
+function renderAffiliatePicker(){
+  affGrid.innerHTML = COMPANIES.map(c => `
+    <label class="affitem">
+      <input type="checkbox" class="affcheck" value="${c.code}">
+      <span>${c.name}</span>
+      <span class="code">${c.code}</span>
+    </label>
+  `).join('');
+}
+
+function selectedCompanyCodes(){
+  return Array.from(document.querySelectorAll('.affcheck:checked')).map(el => el.value);
+}
+
+document.getElementById('affSelectAll').addEventListener('click', () => {
+  document.querySelectorAll('.affcheck').forEach(el => el.checked = true);
+});
+document.getElementById('affSelectNone').addEventListener('click', () => {
+  document.querySelectorAll('.affcheck').forEach(el => el.checked = false);
+});
+loadDataBtn.addEventListener('click', () => loadSelectedAffiliates(selectedCompanyCodes()));
+refreshDataBtn.addEventListener('click', () => {
+  const codes = Object.keys(affiliatesLoaded).length ? Object.keys(affiliatesLoaded) : selectedCompanyCodes();
+  loadSelectedAffiliates(codes);
+});
+
+function setLive(on, label){
+  liveDot.classList.toggle('off', !on);
+  liveDotLabel.textContent = label;
+}
+
+// ---- API row → internal record model (same shape the rest of the app already expects) ----
+
+function toDate(v){
+  if(!v) return null;
+  if(v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  if(typeof v === 'number'){
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000)); // Excel-serial fallback, just in case
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function apiVal(row, keys){
+  for(const k of keys){ if(row[k] !== undefined && row[k] !== null && row[k] !== '') return row[k]; }
+  return null;
+}
+
+// Sage's "Status" field can come back as a numeric code (1/0), a boolean, or a text
+// enum ("Active"/"Inactive") depending on the endpoint/version — handle all of them.
+function isActiveStatus(v){
+  if(v === null || v === undefined) return true; // assume active if the field is missing
+  if(typeof v === 'boolean') return v;
+  if(typeof v === 'number') return v === 1;
+  const s = String(v).trim().toLowerCase();
+  if(['1','active','open','a','yes','true'].includes(s)) return true;
+  if(['0','inactive','closed','i','no','false'].includes(s)) return false;
+  return true;
+}
+function isOnHold(v){
+  if(v === null || v === undefined) return false;
+  if(typeof v === 'boolean') return v;
+  if(typeof v === 'number') return v === 1;
+  const s = String(v).trim().toLowerCase();
+  return ['1','yes','true','hold','onhold','h'].includes(s);
+}
+
+// Optional field collections come back as an array of small objects, e.g.
+// [{ OptionalField: 'CUSTCC', Value: 'RFA...', ValueDescription: '...' }, ...] —
+// property names can vary slightly by Sage version, so try the common variants.
+function extractOptField(optArray, fieldCode){
+  if(!Array.isArray(optArray)) return { value:null, desc:null };
+  const hit = optArray.find(o => {
+    const code = String(apiVal(o, ['OptionalField','OptionalFieldCode','Code','FieldName']) || '').toUpperCase();
+    return code === fieldCode;
+  });
+  if(!hit) return { value:null, desc:null };
+  const value = apiVal(hit, ['Value','ValueCode','OptionalFieldValue']);
+  const desc = apiVal(hit, ['ValueDescription','Description','ValueDesc','VDESC']) || value;
+  return { value: value != null ? String(value) : null, desc: desc != null ? String(desc) : null };
+}
+
+function mapCustomerRow(row, code){
+  const id = String(apiVal(row, ['CustomerNumber','IDCUST']) || '').trim();
+  if(!id) return null;
+  const custcc = extractOptField(row.CustomerOptionalFieldValues, 'CUSTCC');
+  const location = extractOptField(row.CustomerOptionalFieldValues, 'LOCATION');
+  return {
+    id,
+    name: apiVal(row, ['CustomerName','NAMECUST']) || '',
+    active: isActiveStatus(apiVal(row, ['Status'])),
+    onHold: isOnHold(apiVal(row, ['OnHold'])),
+    startDate: toDate(apiVal(row, ['StartDate','DATESTART'])),
+    lastMaintained: toDate(apiVal(row, ['LastMaintainedDate','DATELASTMN'])),
+    custcc: custcc.value, custccDesc: custcc.desc,
+    location: location.value || (apiVal(row,['Location']) != null ? String(apiVal(row,['Location'])) : null),
+    locationDesc: location.desc,
+    type: 'Customer', source: code
+  };
+}
+
+function mapNationalRow(row, code){
+  const id = String(apiVal(row, ['NationalAccountNumber','IDNATACCT']) || '').trim();
+  if(!id) return null;
+  const custcc = extractOptField(row.NationalAccountOptionalFieldValues, 'CUSTCC');
+  const location = extractOptField(row.NationalAccountOptionalFieldValues, 'LOCATION');
+  return {
+    id,
+    name: apiVal(row, ['NationalAccountName','NAMEACCT']) || '',
+    active: isActiveStatus(apiVal(row, ['Status'])),
+    onHold: isOnHold(apiVal(row, ['OnHold'])),
+    custcc: custcc.value, custccDesc: custcc.desc,
+    location: location.value, locationDesc: location.desc,
+    type: 'National account', source: code
+  };
+}
+
+// The proxy returns ONE page per call (to stay well under any function timeout) plus
+// a "nextLink" when there's more — so a big affiliate (thousands of accounts) is
+// fetched as a sequence of small, fast calls instead of one huge one.
+async function fetchAllPagesViaProxy(code, type, onPage){
+  let rows = [];
+  let next = null;
+  let guard = 0;
+  while(guard++ < 200){
+    const url = next
+      ? `${PROXY_URL}?next=${encodeURIComponent(next)}`
+      : `${PROXY_URL}?company=${encodeURIComponent(code)}&type=${type}`;
+    const res = await fetch(url, {cache:'no-store'});
+    const json = await res.json().catch(() => ({}));
+    if(!res.ok) throw new Error(json.error || `${type} request failed (${res.status})`);
+    rows = rows.concat(json.records || []);
+    if(onPage) onPage(rows.length);
+    next = json.nextLink || null;
+    if(!next) break;
+  }
+  return rows;
+}
+
+// Sage 300 Web API logins are typically limited to a small number of concurrent
+// sessions, so the customers and national-accounts calls for one affiliate are made
+// one after another (not in parallel) — this avoids spurious 409 "SessionError" responses.
+async function fetchAffiliate(code){
+  const result = { code, customers: [], national: [], error: null };
+  try{
+    const custRows = await fetchAllPagesViaProxy(code, 'customers', n => {
+      loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… ${n} customer accounts so far`;
+    });
+    result.customers = custRows.map(r => mapCustomerRow(r, code)).filter(Boolean);
+
+    const natRows = await fetchAllPagesViaProxy(code, 'national', n => {
+      loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… ${n} national accounts so far`;
+    });
+    result.national = natRows.map(r => mapNationalRow(r, code)).filter(Boolean);
+  }catch(err){
+    result.error = String(err.message || err);
+  }
+  return result;
+}
+
+// Runs affiliate fetches with limited concurrency so we don't hammer the Sage API /
+// the Netlify Function all at once.
+async function loadSelectedAffiliates(codes){
+  if(!codes.length){
+    loadStatus.textContent = 'Select at least one affiliate first.';
+    return;
+  }
+  loadDataBtn.disabled = true; refreshDataBtn.disabled = true;
+  setLive(false, 'Loading from Sage 300…');
+  loadProgress.style.display = 'block';
+  loadProgressFill.style.width = '0%';
+  loadStatus.textContent = `Loading ${codes.length} affiliate(s)…`;
+
+  affiliatesLoaded = {};
+  allRecords = [];
+
+  // Sequential: Sage 300 Web API logins are typically capped at a small number of
+  // concurrent sessions, so loading affiliates one at a time avoids 409 session errors.
+  const CONCURRENCY = 1;
+  let done = 0;
+  let idx = 0;
+  async function worker(){
+    while(idx < codes.length){
+      const code = codes[idx++];
+      loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… (${done}/${codes.length} done)`;
+      const r = await fetchAffiliate(code);
+      if(r.error){
+        affiliatesLoaded[code] = { customers:0, national:0, error:r.error };
+      }else{
+        allRecords = allRecords.filter(rec => rec.source !== code)
+          .concat(r.customers, r.national);
+        affiliatesLoaded[code] = { customers:r.customers.length, national:r.national.length, error:null };
+      }
+      done++;
+      loadProgressFill.style.width = Math.round(done / codes.length * 100) + '%';
+      renderAffChips();
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(CONCURRENCY, codes.length)}, worker));
+
+  loadProgress.style.display = 'none';
+  loadDataBtn.disabled = false; refreshDataBtn.disabled = false;
+
+  const errorCount = Object.values(affiliatesLoaded).filter(a => a.error).length;
+  renderAffChips();
+  renderStatbar();
+  renderCifStats();
+  updateDashboard();
+  runSearch();
+
+  const now = new Date();
+  lastSyncEl.textContent = `Last synced: ${now.toLocaleString()}`;
+  if(allRecords.length){
+    setLive(true, 'Connected to Sage 300 — live data');
+    emptyState.innerHTML = '<b>Ready to search</b>Type a CUSTCC code, a LOCATION code or a name, then press Search.';
+  }else{
+    setLive(false, 'No data returned — check credentials / affiliate access');
+  }
+  loadStatus.innerHTML = errorCount
+    ? `<b>${allRecords.length}</b> accounts loaded. <span style="color:var(--red);">${errorCount} affiliate(s) failed</span> — see chips below for details.`
+    : `<b>${allRecords.length}</b> accounts loaded live from <b>${codes.length}</b> affiliate(s).`;
+}
+
+function renderAffChips(){
+  filechips.innerHTML = '';
+  Object.entries(affiliatesLoaded).forEach(([code, info]) => {
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    const label = AFFILIATE_NAMES[code] || code;
+    chip.innerHTML = info.error
+      ? `<span title="${info.error}">${label}</span><span class="cnt" style="color:var(--red);">⚠ error</span>`
+      : `<span>${label}</span><span class="cnt">${info.customers + info.national} accounts</span>`;
+    const btn = document.createElement('button');
+    btn.textContent = '✕';
+    btn.onclick = () => {
+      allRecords = allRecords.filter(r => r.source !== code);
+      delete affiliatesLoaded[code];
+      renderAffChips();
+      renderStatbar();
+      renderCifStats();
+      updateDashboard();
+      runSearch();
+    };
+    chip.appendChild(btn);
+    filechips.appendChild(chip);
+  });
+}
+
+function renderStatbar(){
+  if(!allRecords.length){ statbar.style.display = 'none'; statbar.innerHTML=''; return; }
+  const total = allRecords.length;
+  const active = allRecords.filter(r => r.active).length;
+  const national = allRecords.filter(r => r.type === 'National account').length;
+  const customers = total - national;
+  statbar.style.display = 'flex';
+  statbar.innerHTML = `
+    <div class="statpill"><div class="n">${total}</div><div class="l">Accounts loaded</div></div>
+    <div class="statpill"><div class="n">${active}</div><div class="l">Active</div></div>
+    <div class="statpill"><div class="n">${customers}</div><div class="l">Customer accounts</div></div>
+    <div class="statpill"><div class="n">${national}</div><div class="l">National accounts</div></div>
+  `;
+}
+
+// ---- Generic detection: overall last account created (any series) + last prepaid card (descending 09 pattern) ----
+const SERIES_ID_RE = /^([A-Za-z]+)(\d{4,})([A-Za-z]+)$/;
+
+function parseSeriesId(rawId){
+  const id = String(rawId).toUpperCase();
+  const m = id.match(SERIES_ID_RE);
+  if(!m) return null;
+  const digits = m[2];
+  // sequence number = characters 5 through 9 of the full ID (i.e. digits, minus the 1st digit
+  // right after the prefix, which is a category marker, not part of the incrementing sequence)
+  const seqNum = digits.length > 1 ? parseInt(digits.slice(1),10) : parseInt(digits,10);
+  return { id, prefix: m[1], digits, suffix: m[3], num: parseInt(digits,10), seqNum };
+}
+
+function renderCifStats(){
+  const fileNames = [...new Set(allRecords.filter(r => r.type === 'Customer').map(r => r.source))];
+  let html = '';
+  let anyFound = false;
+
+  fileNames.forEach(fname => {
+    const ids = allRecords.filter(r => r.source === fname && r.type === 'Customer').map(r => r.id);
+    const parsed = ids.map(parseSeriesId).filter(Boolean);
+    // parseSeriesId already requires IDs to start AND end with a letter
+    if(!parsed.length) return;
+    anyFound = true;
+
+    // special descending sub-pattern: prefix + digits starting "09" + suffix "O" (prepaid card pool counting down)
+    const prepaidPool = parsed.filter(p => p.digits.slice(0,2) === '09' && p.suffix === 'O');
+    const normalPool = parsed.filter(p => !(p.digits.slice(0,2) === '09' && p.suffix === 'O'));
+
+    html += `<div class="cif-file-title">${AFFILIATE_NAMES[fname] || fname}<span class="tag">${parsed.length} letter-to-letter accounts</span></div><div class="cifgrid">`;
+
+    if(normalPool.length){
+      const last = normalPool.reduce((a,b) => a.seqNum > b.seqNum ? a : b);
+      html += `<div class="cifcard">
+        <div class="lbl">Last account created</div>
+        <div class="id mono">${last.id}</div>
+        <div class="sub">Highest number, starting from the 5<sup>th</sup> character (${normalPool.length} accounts)</div>
+      </div>`;
+    }
+    if(prepaidPool.length){
+      const last = prepaidPool.reduce((a,b) => a.num < b.num ? a : b);
+      const remainder = last.digits.slice(2);
+      html += `<div class="cifcard prepaid">
+        <div class="lbl">Last prepaid card created</div>
+        <div class="id mono">${last.prefix}09[${remainder}]O</div>
+        <div class="sub">Descending series — ${prepaidPool.length} cards issued</div>
+      </div>`;
+    }
+    html += `</div>`;
+  });
+
+  if(anyFound){
+    cifCard.style.display = 'block';
+    cifContent.innerHTML = html;
+  }else{
+    cifCard.style.display = 'none';
+    cifContent.innerHTML = '';
+  }
+}
+
+// ---- Extra search criteria (+) ----
+const FIELD_OPTIONS = [
+  {v:'name', l:'Account name'},
+  {v:'id', l:'Account number'},
+  {v:'custcc', l:'CUSTCC'},
+  {v:'location', l:'Location'},
+  {v:'type', l:'Type (customer / national)'},
+  {v:'onhold', l:'On hold (yes/no)'},
+];
+
+document.getElementById('addCritBtn').addEventListener('click', () => {
+  const rowId = 'f' + Date.now() + Math.random().toString(36).slice(2,6);
+  extraFilters.push({ id: rowId, field: 'location' });
+  renderExtraFilters();
+});
+
+function renderExtraFilters(){
+  extraFiltersEl.innerHTML = '';
+  extraFilters.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'filterRow';
+    const select = document.createElement('select');
+    FIELD_OPTIONS.forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt.v; o.textContent = opt.l;
+      if(opt.v === f.field) o.selected = true;
+      select.appendChild(o);
+    });
+    select.onchange = () => { f.field = select.value; runSearch(); };
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Value(s)… e.g. RFA, RFE for OR';
+    input.value = f.value || '';
+    input.oninput = () => { f.value = input.value; runSearch(); };
+    input.addEventListener('keydown', e => { if(e.key === 'Enter') runSearch(); });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = '✕';
+    removeBtn.onclick = () => {
+      extraFilters = extraFilters.filter(x => x.id !== f.id);
+      renderExtraFilters();
+      runSearch();
+    };
+
+    row.appendChild(select); row.appendChild(input); row.appendChild(removeBtn);
+    extraFiltersEl.appendChild(row);
+  });
+}
+
+function runSearch(){
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const activeOnly = document.getElementById('activeOnly').checked;
+  const activeExtra = extraFilters.filter(f => f.value && f.value.trim());
+  const exportBtn = document.getElementById('exportBtn');
+
+  if(!allRecords.length){
+    tablewrap.innerHTML = '';
+    tablewrap.appendChild(emptyState);
+    resultCount.textContent = '';
+    lastResults = [];
+    exportBtn.style.display = 'none';
+    return;
+  }
+  if(!q && !activeExtra.length){
+    tablewrap.innerHTML = `<div class="empty"><b>Enter a criterion</b>Type a CUSTCC code, a LOCATION code, a name — or add a precise criterion with the "+" button.</div>`;
+    resultCount.textContent = '';
+    lastResults = [];
+    exportBtn.style.display = 'none';
+    return;
+  }
+
+  let results = allRecords.filter(r => {
+    if(q){
+      const values = q.split(',').map(v => v.trim()).filter(Boolean);
+      const haystack = [r.id, r.name, r.custcc, r.custccDesc, r.location, r.locationDesc, r.type]
+        .filter(Boolean).join(' ').toLowerCase();
+      if(!values.some(v => haystack.includes(v))) return false;
+    }
+    for(const f of activeExtra){
+      const values = f.value.split(',').map(v => v.trim().toLowerCase()).filter(Boolean);
+      if(!values.length) continue;
+      let fieldVal = '';
+      if(f.field === 'name') fieldVal = r.name || '';
+      else if(f.field === 'id') fieldVal = r.id || '';
+      else if(f.field === 'custcc') fieldVal = [r.custcc, r.custccDesc].filter(Boolean).join(' ');
+      else if(f.field === 'location') fieldVal = [r.location, r.locationDesc].filter(Boolean).join(' ');
+      else if(f.field === 'type') fieldVal = r.type || '';
+      else if(f.field === 'onhold') fieldVal = r.onHold ? 'yes' : 'no';
+      fieldVal = fieldVal.toLowerCase();
+      // account numbers: match by prefix (e.g. "RFA, RFE" finds accounts starting with either)
+      // everything else: match by substring, so any of the comma-separated values can hit
+      const matches = f.field === 'id'
+        ? values.some(v => fieldVal.startsWith(v))
+        : values.some(v => fieldVal.includes(v));
+      if(!matches) return false;
+    }
+    return true;
+  });
+  if(activeOnly) results = results.filter(r => r.active);
+  results.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+  lastResults = results;
+
+  resultCount.innerHTML = `<b>${results.length}</b> account(s) found${activeOnly ? ' (active only)' : ''}`;
+
+  if(!results.length){
+    tablewrap.innerHTML = `<div class="empty"><b>No results</b>Try without the "active only" filter, or check the spelling of your criterion.</div>`;
+    exportBtn.style.display = 'none';
+    return;
+  }
+  exportBtn.style.display = 'inline-block';
+
+  let html = `<table><thead><tr>
+    <th>Account</th><th>Name</th><th>Status</th><th>Type</th><th>CUSTCC</th><th>Location</th><th>Affiliate</th>
+  </tr></thead><tbody>`;
+  results.forEach(r => {
+    const isNat = r.type === 'National account';
+    html += `<tr class="${isNat ? 'national' : ''}">
+      <td class="mono">${r.id}</td>
+      <td>${r.name || '—'}</td>
+      <td><span class="badge ${r.active ? 'active' : 'inactive'}">${r.active ? 'Active' : 'Inactive'}</span>${r.onHold ? ' <span class="badge" style="background:var(--amber-bg); color:var(--amber);">On hold</span>' : ''}</td>
+      <td><span class="badge ${isNat ? 'type-national' : 'type-client'}">${r.type}</span></td>
+      <td>${r.custccDesc ? r.custccDesc + (r.custcc && r.custcc!==r.custccDesc ? ' <span class="tag mono">'+r.custcc+'</span>' : '') : (r.custcc || '—')}</td>
+      <td>${r.locationDesc ? r.locationDesc + (r.location && r.location!==r.locationDesc ? ' <span class="tag mono">'+r.location+'</span>' : '') : (r.location || '—')}</td>
+      <td class="mono" style="font-size:11px; color:var(--text-mut);">${AFFILIATE_NAMES[r.source] || r.source}</td>
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+  tablewrap.innerHTML = html;
+}
+
+document.getElementById('searchBtn').addEventListener('click', runSearch);
+document.getElementById('activeOnly').addEventListener('change', runSearch);
+document.getElementById('exportBtn').addEventListener('click', exportCSV);
+
+function csvEscape(val){
+  const s = (val === null || val === undefined) ? '' : String(val);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function exportCSV(){
+  if(!lastResults.length) return;
+  const headers = ['Account','Name','Status','On Hold','Type','CUSTCC','Location','Affiliate'];
+  const rows = lastResults.map(r => [
+    r.id,
+    r.name || '',
+    r.active ? 'Active' : 'Inactive',
+    r.onHold ? 'Yes' : 'No',
+    r.type,
+    r.custccDesc || r.custcc || '',
+    r.locationDesc || r.location || '',
+    AFFILIATE_NAMES[r.source] || r.source
+  ]);
+  const csv = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `account-search-results-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+document.getElementById('q').addEventListener('keydown', e => { if(e.key === 'Enter') runSearch(); });
+// "Reset" only clears the search criteria — the live data stays loaded (use the
+// affiliate picker's "✕" on a chip, or Refresh, to change what data is loaded).
+document.getElementById('resetBtn').addEventListener('click', () => {
+  extraFilters = []; lastResults = [];
+  document.getElementById('q').value = '';
+  document.getElementById('activeOnly').checked = true;
+  document.getElementById('exportBtn').style.display = 'none';
+  renderExtraFilters();
+  runSearch();
+});
+
+// ==================== DASHBOARD ====================
+let chartRetailComm = null, chartStatus = null, chartWeekly = null;
+
+function updateDashboard(){
+  const dashEmptyCard = document.getElementById('dashEmptyCard');
+  const dashContent = document.getElementById('dashContent');
+  const customers = allRecords.filter(r => r.type === 'Customer');
+
+  if(!allRecords.length){
+    dashEmptyCard.style.display = 'block';
+    dashContent.style.display = 'none';
+    return;
+  }
+  dashEmptyCard.style.display = 'none';
+  dashContent.style.display = 'block';
+
+  const total = allRecords.length;
+  const active = allRecords.filter(r => r.active).length;
+  const inactive = total - active;
+  const onHold = customers.filter(r => r.onHold).length;
+  const retail = allRecords.filter(r => /^R/i.test(r.id)).length;
+  const commercial = allRecords.filter(r => /^C/i.test(r.id)).length;
+  const other = total - retail - commercial;
+
+  const now = new Date();
+  const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7);
+  const createdLastWeek = customers.filter(r => r.startDate && r.startDate >= weekAgo && r.startDate <= now).length;
+
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const deactivatedThisMonth = customers.filter(r =>
+    !r.active && r.lastMaintained && r.lastMaintained >= monthStart && r.lastMaintained <= now
+  ).length;
+
+  const kpiRow = document.getElementById('kpiRow');
+  kpiRow.innerHTML = `
+    <div class="kpicard"><div class="kn">${total}</div><div class="kl">Total accounts</div></div>
+    <div class="kpicard accent-teal"><div class="kn">${active}</div><div class="kl">Active</div></div>
+    <div class="kpicard accent-red"><div class="kn">${inactive}</div><div class="kl">Inactive</div></div>
+    <div class="kpicard accent-amber"><div class="kn">${onHold}</div><div class="kl">On hold</div></div>
+    <div class="kpicard accent-purple"><div class="kn">${retail}</div><div class="kl">Retail (starts with R)</div></div>
+    <div class="kpicard"><div class="kn">${commercial}</div><div class="kl">Commercial (starts with C)</div></div>
+    <div class="kpicard accent-teal"><div class="kn">${createdLastWeek}</div><div class="kl">Created last 7 days</div><div class="ks">${weekAgo.toLocaleDateString()} – ${now.toLocaleDateString()}</div></div>
+    <div class="kpicard accent-red"><div class="kn">${deactivatedThisMonth}</div><div class="kl">Deactivated this month</div><div class="ks">Inactive & last maintained since ${monthStart.toLocaleDateString()}</div></div>
+  `;
+
+  // Chart A: Retail vs Commercial vs Other
+  const ctxA = document.getElementById('chartRetailComm').getContext('2d');
+  if(chartRetailComm) chartRetailComm.destroy();
+  chartRetailComm = new Chart(ctxA, {
+    type: 'doughnut',
+    data: {
+      labels: ['Retail (R…)', 'Commercial (C…)', 'Other'],
+      datasets: [{ data: [retail, commercial, other], backgroundColor: ['#0F6E56','#1B5C93','#D9CCF2'] }]
+    },
+    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11.5 } } } } }
+  });
+
+  // Chart B: Status breakdown (Active / Inactive / On hold)
+  const ctxB = document.getElementById('chartStatus').getContext('2d');
+  if(chartStatus) chartStatus.destroy();
+  chartStatus = new Chart(ctxB, {
+    type: 'doughnut',
+    data: {
+      labels: ['Active', 'Inactive', 'On hold'],
+      datasets: [{ data: [active, inactive, onHold], backgroundColor: ['#0F6E56','#A32D2D','#854F0B'] }]
+    },
+    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11.5 } } } } }
+  });
+
+  // Chart C: accounts created per week, last 8 weeks
+  const weeks = [];
+  for(let i=7;i>=0;i--){
+    const start = new Date(now); start.setDate(now.getDate() - i*7 - 6);
+    const end = new Date(now); end.setDate(now.getDate() - i*7);
+    const count = customers.filter(r => r.startDate && r.startDate >= start && r.startDate <= end).length;
+    weeks.push({ label: `${start.getMonth()+1}/${start.getDate()}`, count });
+  }
+  const ctxC = document.getElementById('chartWeekly').getContext('2d');
+  if(chartWeekly) chartWeekly.destroy();
+  chartWeekly = new Chart(ctxC, {
+    type: 'bar',
+    data: {
+      labels: weeks.map(w => w.label),
+      datasets: [{ label: 'Accounts created', data: weeks.map(w => w.count), backgroundColor: '#0F6E56', borderRadius: 4 }]
+    },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+  });
+}
+
+// ==================== REFERENCE ====================
+const REFERENCE_CODES = [
+  {code:'CIA', category:'Administration', group:'Industrial'},
+  {code:'CIB', category:'Agriculture', group:'Industrial'},
+  {code:'CIC', category:'Agriculture', group:'Industrial'},
+  {code:'CID', category:'Car fleet', group:'Industrial'},
+  {code:'CIE', category:'Cement', group:'Industrial'},
+  {code:'CIF', category:'Construction', group:'Industrial'},
+  {code:'CIG', category:'Distributors', group:'Industrial'},
+  {code:'CIH', category:'Energy', group:'Industrial'},
+  {code:'CII', category:'Food and drugs industry', group:'Industrial'},
+  {code:'CIJ', category:'Forestry', group:'Industrial'},
+  {code:'CIK', category:'Metal manufacturing', group:'Industrial'},
+  {code:'CIL', category:'Mining', group:'Industrial'},
+  {code:'CIM', category:'Process industry', group:'Industrial'},
+  {code:'CIN', category:'Pulp and paper industry', group:'Industrial'},
+  {code:'CIO', category:'Quarrying', group:'Industrial'},
+  {code:'CIP', category:'Railways', group:'Industrial'},
+  {code:'CIQ', category:'Shops and workshops', group:'Industrial'},
+  {code:'CIR', category:'Truck and bus fleet', group:'Industrial'},
+  {code:'CIS', category:'Truck dealers', group:'Industrial'},
+  {code:'CIZ', category:'Other industrial', group:'Industrial'},
+  {code:'CAA', category:'Aviation military or administration', group:'Aviation'},
+  {code:'CAB', category:'Aviation service provider', group:'Aviation'},
+  {code:'CAC', category:'Commercial airline', group:'Aviation'},
+  {code:'CAZ', category:'Other aviation', group:'Aviation'},
+  {code:'CMA', category:'Local', group:'Marine'},
+  {code:'CMB', category:'Marine international', group:'Marine'},
+  {code:'CMC', category:'Marine military or administration', group:'Marine'},
+  {code:'CMD', category:'Marine service provider', group:'Marine'},
+  {code:'CEA', category:'Export to 3rd party', group:'Other commercial'},
+  {code:'CCA', category:'Sales to competition', group:'Other commercial'},
+  {code:'IXX', category:'Intercompany sales', group:'Other commercial'},
+  {code:'DDT', category:'Doubtful debt', group:'Other commercial'},
+  {code:'RFA', category:'COCO', group:'Customer group'},
+  {code:'RFB', category:'CODO', group:'Customer group'},
+  {code:'RFC', category:'CLDO', group:'Customer group'},
+  {code:'RFD', category:'DODO', group:'Customer group'},
+  {code:'RFF', category:'UNDODO', group:'Customer group'},
+  {code:'RFX', category:'CARDS', group:'Customer group'},
+  {code:'RFE', category:'CLCO', group:'Customer group'},
+  {code:'RBA', category:'Shop', group:'Retail'},
+  {code:'RBB', category:'Food', group:'Retail'},
+  {code:'RBC', category:'ATM', group:'Retail'},
+  {code:'RBD', category:'Coffee', group:'Retail'},
+  {code:'RBE', category:'Billboard', group:'Retail'},
+  {code:'RBF', category:'Pharmacy', group:'Retail'},
+  {code:'RBG', category:'Insurance', group:'Retail'},
+  {code:'RBH', category:'Laundry', group:'Retail'},
+  {code:'RBI', category:'Exchange & money transfer', group:'Retail'},
+  {code:'RBJ', category:'Mobile money transfer', group:'Retail'},
+  {code:'RBK', category:'Shop + food', group:'Retail'},
+  {code:'RBL', category:'Store', group:'Retail'},
+  {code:'RSA', category:'Automatic car wash', group:'Retail service'},
+  {code:'RSB', category:'Car care center', group:'Retail service'},
+  {code:'RSC', category:'Lubes bay', group:'Retail service'},
+  {code:'RSD', category:'Manual car wash', group:'Retail service'},
+];
+
+const CURRENCY_CODES = [
+  {code:'0', category:'Local Currency'},
+  {code:'1', category:'USD'},
+  {code:'2', category:'EUR'},
+  {code:'3', category:'AED'},
+];
+
+function renderCurrencyTable(){
+  const body = document.getElementById('currencyTableBody');
+  body.innerHTML = CURRENCY_CODES.map(c =>
+    `<tr><td>${c.category}</td><td class="mono">${c.code}</td></tr>`
+  ).join('');
+}
+renderCurrencyTable();
+
+function renderReferenceSearch(){
+  const q = document.getElementById('refQ').value.trim().toLowerCase();
+  const results = document.getElementById('refResults');
+  if(!q){
+    results.innerHTML = `<table><thead><tr><th>Code</th><th>Category</th><th>Group</th></tr></thead><tbody>${
+      REFERENCE_CODES.map(r => `<tr><td class="mono">${r.code}</td><td>${r.category}</td><td><span class="tag">${r.group}</span></td></tr>`).join('')
+    }</tbody></table>`;
+    return;
+  }
+  const matches = REFERENCE_CODES.filter(r =>
+    r.code.toLowerCase().includes(q) || r.category.toLowerCase().includes(q) || r.group.toLowerCase().includes(q)
+  );
+  if(!matches.length){
+    results.innerHTML = `<div class="empty"><b>No match</b>Try a different code or category name.</div>`;
+    return;
+  }
+  results.innerHTML = `<table><thead><tr><th>Code</th><th>Category</th><th>Group</th></tr></thead><tbody>${
+    matches.map(r => `<tr><td class="mono">${r.code}</td><td>${r.category}</td><td><span class="tag">${r.group}</span></td></tr>`).join('')
+  }</tbody></table>`;
+}
+document.getElementById('refQ').addEventListener('input', renderReferenceSearch);
+renderReferenceSearch();
+
+// ==================== ACCOUNT CREATION MESSAGE TEMPLATE ====================
+const tplFields = ['tplName','tplIdnat','tplCustcc','tplLocation','tplBravo'];
+
+function buildTplHTML(){
+  const name = document.getElementById('tplName').value || '—';
+  const idnat = document.getElementById('tplIdnat').value || '—';
+  const custcc = document.getElementById('tplCustcc').value || '—';
+  const location = document.getElementById('tplLocation').value || '—';
+  const bravo = document.getElementById('tplBravo').value || '—';
+  return `<p>Account created with the following details</p>
+<table>
+<tr><th>Name</th><th>IDNAT</th><th>CUSTCC</th><th>LOCATION</th><th>BRAVO CODE</th></tr>
+<tr><td>${name}</td><td>${idnat}</td><td>${custcc}</td><td>${location}</td><td>${bravo}</td></tr>
+</table>
+<p>Regards<br>Karim Mhidi</p>`;
+}
+
+function buildTplText(){
+  const name = document.getElementById('tplName').value || '';
+  const idnat = document.getElementById('tplIdnat').value || '';
+  const custcc = document.getElementById('tplCustcc').value || '';
+  const location = document.getElementById('tplLocation').value || '';
+  const bravo = document.getElementById('tplBravo').value || '';
+  return `Account created with the following details\n\nName: ${name}\nIDNAT: ${idnat}\nCUSTCC: ${custcc}\nLOCATION: ${location}\nBRAVO CODE: ${bravo}\n\nRegards\nKarim Mhidi`;
+}
+
+function renderTplPreview(){
+  document.getElementById('tplPreview').innerHTML = buildTplHTML();
+}
+tplFields.forEach(id => document.getElementById(id).addEventListener('input', renderTplPreview));
+renderTplPreview();
+
+document.getElementById('copyTplBtn').addEventListener('click', async () => {
+  const html = buildTplHTML();
+  const text = buildTplText();
+  const status = document.getElementById('copyTplStatus');
+  try{
+    if(navigator.clipboard && window.ClipboardItem){
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], {type:'text/html'}),
+          'text/plain': new Blob([text], {type:'text/plain'})
+        })
+      ]);
+    }else{
+      await navigator.clipboard.writeText(text);
+    }
+  }catch(err){
+    try{ await navigator.clipboard.writeText(text); }catch(e2){ console.error('Copy failed', e2); }
+  }
+  status.style.display = 'inline';
+  setTimeout(() => { status.style.display = 'none'; }, 2000);
+});
+</script>
+</body>
+</html>
