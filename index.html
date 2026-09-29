@@ -701,19 +701,27 @@ async function fetchAllPagesViaProxy(code, type, onPage){
 // sessions, so the customers and national-accounts calls for one affiliate are made
 // one after another (not in parallel) — this avoids spurious 409 "SessionError" responses.
 async function fetchAffiliate(code){
-  const result = { code, customers: [], national: [], error: null };
+  const result = { code, customers: [], national: [], error: null, nationalError: null };
   try{
     const custRows = await fetchAllPagesViaProxy(code, 'customers', n => {
       loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… ${n} customer accounts so far`;
     });
     result.customers = custRows.map(r => mapCustomerRow(r, code)).filter(Boolean);
+  }catch(err){
+    result.error = String(err.message || err);
+    return result; // customers is the core data — if that fails, the affiliate failed
+  }
 
+  // National accounts is treated as optional/best-effort: a failure here (e.g. no
+  // access, or an unsupported field) doesn't discard the customer data we already
+  // have — it just means this affiliate has no national-account records for now.
+  try{
     const natRows = await fetchAllPagesViaProxy(code, 'national', n => {
       loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… ${n} national accounts so far`;
     });
     result.national = natRows.map(r => mapNationalRow(r, code)).filter(Boolean);
   }catch(err){
-    result.error = String(err.message || err);
+    result.nationalError = String(err.message || err);
   }
   return result;
 }
@@ -745,11 +753,11 @@ async function loadSelectedAffiliates(codes){
       loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… (${done}/${codes.length} done)`;
       const r = await fetchAffiliate(code);
       if(r.error){
-        affiliatesLoaded[code] = { customers:0, national:0, error:r.error };
+        affiliatesLoaded[code] = { customers:0, national:0, error:r.error, nationalError:null };
       }else{
         allRecords = allRecords.filter(rec => rec.source !== code)
           .concat(r.customers, r.national);
-        affiliatesLoaded[code] = { customers:r.customers.length, national:r.national.length, error:null };
+        affiliatesLoaded[code] = { customers:r.customers.length, national:r.national.length, error:null, nationalError:r.nationalError };
       }
       done++;
       loadProgressFill.style.width = Math.round(done / codes.length * 100) + '%';
@@ -789,7 +797,9 @@ function renderAffChips(){
     const label = AFFILIATE_NAMES[code] || code;
     chip.innerHTML = info.error
       ? `<span title="${info.error}">${label}</span><span class="cnt" style="color:var(--red);">⚠ error</span>`
-      : `<span>${label}</span><span class="cnt">${info.customers + info.national} accounts</span>`;
+      : info.nationalError
+        ? `<span title="National accounts unavailable: ${info.nationalError}">${label}</span><span class="cnt" style="color:var(--amber);">${info.customers} accounts (no national)</span>`
+        : `<span>${label}</span><span class="cnt">${info.customers + info.national} accounts</span>`;
     const btn = document.createElement('button');
     btn.textContent = '✕';
     btn.onclick = () => {
