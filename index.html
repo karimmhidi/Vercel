@@ -120,6 +120,11 @@
   }
   button.addcrit:hover{border-color:var(--teal); background:var(--teal-light);}
 
+  .affFilterSelect{
+    padding:9px 10px; border:1px solid var(--border); border-radius:7px; font-size:13px; background:#fff; color:var(--text); max-width:220px;
+  }
+  .affFilterSelect:focus{outline:none; border-color:var(--teal);}
+
   .extraFilters{display:flex; flex-direction:column; gap:8px; margin-top:12px;}
   .filterRow{display:flex; gap:8px; align-items:center;}
   .filterRow select{
@@ -361,6 +366,9 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A94A0" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
         <input type="text" id="q" placeholder="CUSTCC, LOCATION, name or account… (comma = OR, e.g. RFA, RFE)">
       </div>
+      <select id="affFilter" class="affFilterSelect" title="Narrow results to one affiliate/country">
+        <option value="">All affiliates</option>
+      </select>
       <label class="toggle"><input type="checkbox" id="activeOnly" checked> Active only</label>
       <button class="primary" id="searchBtn">Search</button>
       <button class="ghost" id="resetBtn">Reset</button>
@@ -577,11 +585,81 @@ document.getElementById('affSelectAll').addEventListener('click', () => {
 document.getElementById('affSelectNone').addEventListener('click', () => {
   document.querySelectorAll('.affcheck').forEach(el => el.checked = false);
 });
-loadDataBtn.addEventListener('click', () => loadSelectedAffiliates(selectedCompanyCodes()));
+loadDataBtn.addEventListener('click', () => loadSelectedAffiliates(selectedCompanyCodes(), false));
 refreshDataBtn.addEventListener('click', () => {
   const codes = Object.keys(affiliatesLoaded).length ? Object.keys(affiliatesLoaded) : selectedCompanyCodes();
-  loadSelectedAffiliates(codes);
+  loadSelectedAffiliates(codes, true); // true = force a fresh pull from Sage, skip the cache
 });
+
+// =================================================================================
+// LOCAL CACHE — Sage 300's API is slow, so once an affiliate is loaded its data is
+// cached in this browser (localStorage) for a while. Re-selecting the same affiliate
+// loads instantly from cache instead of hitting Sage again. "Refresh" always bypasses
+// the cache and pulls live data. Cache is per-browser only, never shared or sent
+// anywhere — it's purely to avoid repeat slow round-trips to Sage.
+// =================================================================================
+const CACHE_PREFIX = 'sst_cache_v1_';
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+function loadFromCache(code){
+  try{
+    const raw = localStorage.getItem(CACHE_PREFIX + code);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(!parsed || !Array.isArray(parsed.customers) || typeof parsed.ts !== 'number') return null;
+    if(Date.now() - parsed.ts > CACHE_TTL_MS) return null; // stale
+    return parsed;
+  }catch(err){
+    return null;
+  }
+}
+
+function saveToCache(code, customers, national, nationalError){
+  try{
+    localStorage.setItem(CACHE_PREFIX + code, JSON.stringify({
+      ts: Date.now(), customers, national, nationalError: nationalError || null,
+    }));
+  }catch(err){
+    // Storage full or unavailable (private browsing, etc.) — just skip caching silently.
+  }
+}
+
+// =================================================================================
+// SHARED CACHE — backed by /api/shared-cache (Vercel Blob). Unlike the browser-only
+// cache above, this is shared by everyone who opens the app: the first person to load
+// an affiliate on a given day pays Sage's slow response once, and every other person
+// (and every later reload) reading that same affiliate that day gets this instead —
+// instant, no Sage call at all. Falls back to a normal live fetch if the shared cache
+// isn't set up yet or is unreachable.
+// =================================================================================
+const SHARED_CACHE_URL = '/api/shared-cache';
+const SHARED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+async function loadFromSharedCache(code){
+  try{
+    const res = await fetch(`${SHARED_CACHE_URL}?company=${encodeURIComponent(code)}`, {cache:'no-store'});
+    if(!res.ok) return null;
+    const json = await res.json();
+    const snap = json.snapshot;
+    if(!snap || !Array.isArray(snap.customers) || typeof snap.ts !== 'number') return null;
+    if(Date.now() - snap.ts > SHARED_CACHE_TTL_MS) return null; // stale (older than a day)
+    return snap;
+  }catch(err){
+    return null; // shared cache unreachable — caller falls back to a live fetch
+  }
+}
+
+async function saveToSharedCache(code, customers, national, nationalError){
+  try{
+    await fetch(`${SHARED_CACHE_URL}?company=${encodeURIComponent(code)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customers, national, nationalError: nationalError || null }),
+    });
+  }catch(err){
+    // Non-fatal — the data is still shown locally, it just won't be shared today.
+  }
+}
 
 function setLive(on, label){
   liveDot.classList.toggle('off', !on);
@@ -655,6 +733,12 @@ function mapCustomerRow(row, code){
     custcc: custcc.value, custccDesc: custcc.desc,
     location: location.value || (apiVal(row,['Location']) != null ? String(apiVal(row,['Location'])) : null),
     locationDesc: location.desc,
+    nationalAccount: (apiVal(row, ['NationalAccount']) || '').toString().trim() || null,
+    creditLimit: (() => {
+      const v = apiVal(row, ['CreditLimit', 'CREDITLIMIT']);
+      const n = v != null ? Number(v) : NaN;
+      return Number.isFinite(n) ? n : null;
+    })(),
     type: 'Customer', source: code
   };
 }
@@ -678,6 +762,10 @@ function mapNationalRow(row, code){
 // The proxy returns ONE page per call (to stay well under any function timeout) plus
 // a "nextLink" when there's more — so a big affiliate (thousands of accounts) is
 // fetched as a sequence of small, fast calls instead of one huge one.
+// onPage(pageRows, totalSoFar) is called after EACH page comes back — pageRows is
+// just the rows from that one page, so the caller can show them immediately instead
+// of waiting for the whole affiliate to finish (Sage can be slow, so this is what
+// makes the app feel responsive even when a full affiliate takes a while).
 async function fetchAllPagesViaProxy(code, type, onPage){
   let rows = [];
   let next = null;
@@ -689,8 +777,9 @@ async function fetchAllPagesViaProxy(code, type, onPage){
     const res = await fetch(url, {cache:'no-store'});
     const json = await res.json().catch(() => ({}));
     if(!res.ok) throw new Error(json.error || `${type} request failed (${res.status})`);
-    rows = rows.concat(json.records || []);
-    if(onPage) onPage(rows.length);
+    const pageRows = json.records || [];
+    rows = rows.concat(pageRows);
+    if(onPage) onPage(pageRows, rows.length);
     next = json.nextLink || null;
     if(!next) break;
   }
@@ -700,13 +789,38 @@ async function fetchAllPagesViaProxy(code, type, onPage){
 // Sage 300 Web API logins are typically limited to a small number of concurrent
 // sessions, so the customers and national-accounts calls for one affiliate are made
 // one after another (not in parallel) — this avoids spurious 409 "SessionError" responses.
-async function fetchAffiliate(code){
-  const result = { code, customers: [], national: [], error: null, nationalError: null };
+// onLiveRows(type, mappedRows) — if provided, is called after EACH page of a genuine
+// live Sage fetch (never for a cache hit, which already returns everything at once)
+// so the caller can show rows the moment they arrive instead of waiting for the
+// whole affiliate (customers + national) to finish.
+async function fetchAffiliate(code, forceRefresh, onLiveRows){
+  if(!forceRefresh){
+    const cached = loadFromCache(code);
+    if(cached){
+      return { code, customers: cached.customers, national: cached.national, error: null, nationalError: cached.nationalError, fromCache: true };
+    }
+
+    // No local (browser) cache hit — check the shared cache before paying Sage's
+    // cost ourselves. If anyone, on any browser, already loaded this affiliate
+    // today, we get their result instantly.
+    const shared = await loadFromSharedCache(code);
+    if(shared){
+      saveToCache(code, shared.customers, shared.national, shared.nationalError); // warm the local cache too
+      return { code, customers: shared.customers, national: shared.national, error: null, nationalError: shared.nationalError || null, fromCache: true, fromSharedCache: true };
+    }
+  }
+
+  const result = { code, customers: [], national: [], error: null, nationalError: null, fromCache: false };
   try{
-    const custRows = await fetchAllPagesViaProxy(code, 'customers', n => {
+    const custRows = await fetchAllPagesViaProxy(code, 'customers', (pageRows, n) => {
       loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… ${n} customer accounts so far`;
+      if(onLiveRows && pageRows.length){
+        const mapped = pageRows.map(r => mapCustomerRow(r, code)).filter(Boolean);
+        result.customers = result.customers.concat(mapped);
+        onLiveRows('customers', mapped);
+      }
     });
-    result.customers = custRows.map(r => mapCustomerRow(r, code)).filter(Boolean);
+    if(!onLiveRows) result.customers = custRows.map(r => mapCustomerRow(r, code)).filter(Boolean);
   }catch(err){
     result.error = String(err.message || err);
     return result; // customers is the core data — if that fails, the affiliate failed
@@ -716,25 +830,33 @@ async function fetchAffiliate(code){
   // access, or an unsupported field) doesn't discard the customer data we already
   // have — it just means this affiliate has no national-account records for now.
   try{
-    const natRows = await fetchAllPagesViaProxy(code, 'national', n => {
+    const natRows = await fetchAllPagesViaProxy(code, 'national', (pageRows, n) => {
       loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… ${n} national accounts so far`;
+      if(onLiveRows && pageRows.length){
+        const mapped = pageRows.map(r => mapNationalRow(r, code)).filter(Boolean);
+        result.national = result.national.concat(mapped);
+        onLiveRows('national', mapped);
+      }
     });
-    result.national = natRows.map(r => mapNationalRow(r, code)).filter(Boolean);
+    if(!onLiveRows) result.national = natRows.map(r => mapNationalRow(r, code)).filter(Boolean);
   }catch(err){
     result.nationalError = String(err.message || err);
   }
+
+  saveToCache(code, result.customers, result.national, result.nationalError);
+  saveToSharedCache(code, result.customers, result.national, result.nationalError); // write-through so the rest of the day is instant for everyone
   return result;
 }
 
 // Runs affiliate fetches with limited concurrency so we don't hammer the Sage API /
 // the Netlify Function all at once.
-async function loadSelectedAffiliates(codes){
+async function loadSelectedAffiliates(codes, forceRefresh){
   if(!codes.length){
     loadStatus.textContent = 'Select at least one affiliate first.';
     return;
   }
   loadDataBtn.disabled = true; refreshDataBtn.disabled = true;
-  setLive(false, 'Loading from Sage 300…');
+  setLive(false, forceRefresh ? 'Refreshing from Sage 300…' : 'Loading…');
   loadProgress.style.display = 'block';
   loadProgressFill.style.width = '0%';
   loadStatus.textContent = `Loading ${codes.length} affiliate(s)…`;
@@ -744,6 +866,7 @@ async function loadSelectedAffiliates(codes){
 
   // Sequential: Sage 300 Web API logins are typically capped at a small number of
   // concurrent sessions, so loading affiliates one at a time avoids 409 session errors.
+  // (Cache hits are instant anyway, so this only slows down genuine live fetches.)
   const CONCURRENCY = 1;
   let done = 0;
   let idx = 0;
@@ -751,13 +874,37 @@ async function loadSelectedAffiliates(codes){
     while(idx < codes.length){
       const code = codes[idx++];
       loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… (${done}/${codes.length} done)`;
-      const r = await fetchAffiliate(code);
+
+      // Clear out any previous rows for this affiliate before a live fetch starts
+      // streaming new ones in (cache hits below merge their whole result at once).
+      allRecords = allRecords.filter(rec => rec.source !== code);
+      affiliatesLoaded[code] = { customers:0, national:0, error:null, nationalError:null, fromCache:false, streaming:true };
+
+      // Sage can be slow — rather than stare at a spinner, show each page of
+      // customer accounts in the results table the moment it arrives.
+      const r = await fetchAffiliate(code, forceRefresh, (type, mappedRows) => {
+        allRecords = allRecords.concat(mappedRows);
+        const info = affiliatesLoaded[code];
+        if(info){
+          if(type === 'customers') info.customers += mappedRows.length;
+          else info.national += mappedRows.length;
+        }
+        renderAffChips();
+        renderStatbar();
+        runSearch();
+      });
+
       if(r.error){
-        affiliatesLoaded[code] = { customers:0, national:0, error:r.error, nationalError:null };
+        affiliatesLoaded[code] = { customers:0, national:0, error:r.error, nationalError:null, fromCache:false };
+      }else if(r.fromCache){
+        // Cache hit (local or shared) — nothing was streamed page by page, so merge
+        // the whole result now.
+        allRecords = allRecords.concat(r.customers, r.national);
+        affiliatesLoaded[code] = { customers:r.customers.length, national:r.national.length, error:null, nationalError:r.nationalError, fromCache:true, fromSharedCache:r.fromSharedCache };
       }else{
-        allRecords = allRecords.filter(rec => rec.source !== code)
-          .concat(r.customers, r.national);
-        affiliatesLoaded[code] = { customers:r.customers.length, national:r.national.length, error:null, nationalError:r.nationalError };
+        // Live fetch — rows were already streamed into allRecords above; just lock
+        // in the final counts (e.g. in case national accounts failed).
+        affiliatesLoaded[code] = { customers:r.customers.length, national:r.national.length, error:null, nationalError:r.nationalError, fromCache:false };
       }
       done++;
       loadProgressFill.style.width = Math.round(done / codes.length * 100) + '%';
@@ -770,6 +917,7 @@ async function loadSelectedAffiliates(codes){
   loadDataBtn.disabled = false; refreshDataBtn.disabled = false;
 
   const errorCount = Object.values(affiliatesLoaded).filter(a => a.error).length;
+  const cacheCount = Object.values(affiliatesLoaded).filter(a => a.fromCache).length;
   renderAffChips();
   renderStatbar();
   renderCifStats();
@@ -777,7 +925,9 @@ async function loadSelectedAffiliates(codes){
   runSearch();
 
   const now = new Date();
-  lastSyncEl.textContent = `Last synced: ${now.toLocaleString()}`;
+  lastSyncEl.textContent = forceRefresh || !cacheCount
+    ? `Last synced: ${now.toLocaleString()}`
+    : `Last synced: ${now.toLocaleString()} (some from cache — use Refresh to force a live pull)`;
   if(allRecords.length){
     setLive(true, 'Connected to Sage 300 — live data');
     emptyState.innerHTML = '<b>Ready to search</b>Type a CUSTCC code, a LOCATION code or a name, then press Search.';
@@ -786,20 +936,26 @@ async function loadSelectedAffiliates(codes){
   }
   loadStatus.innerHTML = errorCount
     ? `<b>${allRecords.length}</b> accounts loaded. <span style="color:var(--red);">${errorCount} affiliate(s) failed</span> — see chips below for details.`
-    : `<b>${allRecords.length}</b> accounts loaded live from <b>${codes.length}</b> affiliate(s).`;
+    : cacheCount
+      ? `<b>${allRecords.length}</b> accounts loaded — <b>${cacheCount}</b> affiliate(s) from cache (instant), <b>${codes.length - cacheCount}</b> fetched live.`
+      : `<b>${allRecords.length}</b> accounts loaded live from <b>${codes.length}</b> affiliate(s).`;
 }
 
 function renderAffChips(){
   filechips.innerHTML = '';
+  renderAffFilterOptions();
   Object.entries(affiliatesLoaded).forEach(([code, info]) => {
     const chip = document.createElement('div');
     chip.className = 'chip';
     const label = AFFILIATE_NAMES[code] || code;
+    const cacheTag = info.fromSharedCache
+      ? ' <span class="tag" title="Loaded from today\'s shared cache (someone already fetched this affiliate today)">shared cache</span>'
+      : info.fromCache ? ' <span class="tag" title="Loaded from local cache instead of Sage">cached</span>' : '';
     chip.innerHTML = info.error
       ? `<span title="${info.error}">${label}</span><span class="cnt" style="color:var(--red);">⚠ error</span>`
       : info.nationalError
-        ? `<span title="National accounts unavailable: ${info.nationalError}">${label}</span><span class="cnt" style="color:var(--amber);">${info.customers} accounts (no national)</span>`
-        : `<span>${label}</span><span class="cnt">${info.customers + info.national} accounts</span>`;
+        ? `<span title="National accounts unavailable: ${info.nationalError}">${label}${cacheTag}</span><span class="cnt" style="color:var(--amber);">${info.customers} accounts (no national)</span>`
+        : `<span>${label}${cacheTag}</span><span class="cnt">${info.customers + info.national} accounts</span>`;
     const btn = document.createElement('button');
     btn.textContent = '✕';
     btn.onclick = () => {
@@ -900,6 +1056,7 @@ const FIELD_OPTIONS = [
   {v:'location', l:'Location'},
   {v:'type', l:'Type (customer / national)'},
   {v:'onhold', l:'On hold (yes/no)'},
+  {v:'nationalaccount', l:'National account'},
 ];
 
 document.getElementById('addCritBtn').addEventListener('click', () => {
@@ -942,9 +1099,29 @@ function renderExtraFilters(){
   });
 }
 
+// Populates the "All affiliates" dropdown on the Search tab from whatever is
+// currently loaded, so the user can narrow the results table to one affiliate
+// without touching the picker in step 2 or reloading any data.
+function renderAffFilterOptions(){
+  const sel = document.getElementById('affFilter');
+  if(!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All affiliates</option>';
+  Object.keys(affiliatesLoaded).sort((a,b) => (AFFILIATE_NAMES[a]||a).localeCompare(AFFILIATE_NAMES[b]||b)).forEach(code => {
+    const o = document.createElement('option');
+    o.value = code;
+    o.textContent = AFFILIATE_NAMES[code] || code;
+    sel.appendChild(o);
+  });
+  // keep the previous selection if that affiliate is still loaded, otherwise reset to "All"
+  sel.value = Object.prototype.hasOwnProperty.call(affiliatesLoaded, prev) ? prev : '';
+}
+
 function runSearch(){
   const q = document.getElementById('q').value.trim().toLowerCase();
   const activeOnly = document.getElementById('activeOnly').checked;
+  const affFilterEl = document.getElementById('affFilter');
+  const affFilter = affFilterEl ? affFilterEl.value : '';
   const activeExtra = extraFilters.filter(f => f.value && f.value.trim());
   const exportBtn = document.getElementById('exportBtn');
 
@@ -981,6 +1158,7 @@ function runSearch(){
       else if(f.field === 'location') fieldVal = [r.location, r.locationDesc].filter(Boolean).join(' ');
       else if(f.field === 'type') fieldVal = r.type || '';
       else if(f.field === 'onhold') fieldVal = r.onHold ? 'yes' : 'no';
+      else if(f.field === 'nationalaccount') fieldVal = r.nationalAccount || '';
       fieldVal = fieldVal.toLowerCase();
       // account numbers: match by prefix (e.g. "RFA, RFE" finds accounts starting with either)
       // everything else: match by substring, so any of the comma-separated values can hit
@@ -992,6 +1170,7 @@ function runSearch(){
     return true;
   });
   if(activeOnly) results = results.filter(r => r.active);
+  if(affFilter) results = results.filter(r => r.source === affFilter);
   results.sort((a,b) => (a.name||'').localeCompare(b.name||''));
   lastResults = results;
 
@@ -1005,7 +1184,7 @@ function runSearch(){
   exportBtn.style.display = 'inline-block';
 
   let html = `<table><thead><tr>
-    <th>Account</th><th>Name</th><th>Status</th><th>Type</th><th>CUSTCC</th><th>Location</th><th>Affiliate</th>
+    <th>Account</th><th>Name</th><th>Status</th><th>Type</th><th>CUSTCC</th><th>Location</th><th>National account</th><th>Credit limit</th><th>Affiliate</th>
   </tr></thead><tbody>`;
   results.forEach(r => {
     const isNat = r.type === 'National account';
@@ -1016,6 +1195,8 @@ function runSearch(){
       <td><span class="badge ${isNat ? 'type-national' : 'type-client'}">${r.type}</span></td>
       <td>${r.custccDesc ? r.custccDesc + (r.custcc && r.custcc!==r.custccDesc ? ' <span class="tag mono">'+r.custcc+'</span>' : '') : (r.custcc || '—')}</td>
       <td>${r.locationDesc ? r.locationDesc + (r.location && r.location!==r.locationDesc ? ' <span class="tag mono">'+r.location+'</span>' : '') : (r.location || '—')}</td>
+      <td class="mono">${r.nationalAccount || '—'}</td>
+      <td class="mono">${r.creditLimit != null ? r.creditLimit.toLocaleString() : '—'}</td>
       <td class="mono" style="font-size:11px; color:var(--text-mut);">${AFFILIATE_NAMES[r.source] || r.source}</td>
     </tr>`;
   });
@@ -1025,6 +1206,7 @@ function runSearch(){
 
 document.getElementById('searchBtn').addEventListener('click', runSearch);
 document.getElementById('activeOnly').addEventListener('change', runSearch);
+document.getElementById('affFilter').addEventListener('change', runSearch);
 document.getElementById('exportBtn').addEventListener('click', exportCSV);
 
 function csvEscape(val){
@@ -1034,7 +1216,7 @@ function csvEscape(val){
 
 function exportCSV(){
   if(!lastResults.length) return;
-  const headers = ['Account','Name','Status','On Hold','Type','CUSTCC','Location','Affiliate'];
+  const headers = ['Account','Name','Status','On Hold','Type','CUSTCC','Location','National Account','Credit Limit','Affiliate'];
   const rows = lastResults.map(r => [
     r.id,
     r.name || '',
@@ -1043,6 +1225,8 @@ function exportCSV(){
     r.type,
     r.custccDesc || r.custcc || '',
     r.locationDesc || r.location || '',
+    r.nationalAccount || '',
+    r.creditLimit != null ? r.creditLimit : '',
     AFFILIATE_NAMES[r.source] || r.source
   ]);
   const csv = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\r\n');
