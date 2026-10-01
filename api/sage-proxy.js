@@ -28,9 +28,6 @@ const COMPANY_CODES = {
   SNDATA: 'SNDATA', // OLA Energy Sénégal
   TDDATA: 'TDDATA', // OLA Energy Chad S.A.
   UGDATA: 'UGDATA', // OLA Energy Uganda Limited
-  ERODAT: 'ERODAT', // Libya Oil Eritrea
-  ERTDAT: 'ERTDAT', // Tamoil Malindi (Eritrea)
-  SDDATA: 'SDDATA', // Libya Oil Sudan Company Ltd.
 };
 
 // Display names, used by the /api/sage-proxy?list=companies endpoint so the
@@ -50,12 +47,9 @@ const COMPANY_NAMES = {
   SNDATA: "OLA Energy Sénégal",
   TDDATA: "OLA Energy Chad S.A.",
   UGDATA: "OLA Energy Uganda Limited",
-  ERODAT: "Libya Oil Eritrea",
-  ERTDAT: "Tamoil Malindi (Eritrea)",
-  SDDATA: "Libya Oil Sudan Company Ltd.",
 };
 
-const CUSTOMER_SELECT = 'CustomerNumber,GroupCode,NationalAccount,Status,OnHold,CustomerName,CustomerOptionalFieldValues';
+const CUSTOMER_SELECT = 'CustomerNumber,GroupCode,NationalAccount,Status,OnHold,CustomerName,CreditLimit,CustomerOptionalFieldValues';
 const NATIONAL_SELECT = 'NationalAccountNumber,GroupCode,Status,OnHold,NationalAccountName,NationalAccountOptionalFieldValues';
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
@@ -163,7 +157,9 @@ module.exports = async (req, res) => {
     }
     const select = type === 'national' ? NATIONAL_SELECT : CUSTOMER_SELECT;
     const entity = type === 'national' ? 'ARNationalAccounts' : 'ARCustomers';
-    targetUrl = `${BASE_URL}/-/${companyId}/AR/${entity}?$select=${encodeURIComponent(select)}`;
+    // $top asks Sage for a bigger page per request — Sage's own server-side cap may
+    // still apply, but when it doesn't this cuts the number of slow round-trips a lot.
+    targetUrl = `${BASE_URL}/-/${companyId}/AR/${entity}?$select=${encodeURIComponent(select)}&$top=1000`;
   }
 
   try{
@@ -179,3 +175,4 @@ module.exports = async (req, res) => {
     res.status(502).json({ error: String(err.message || err) });
   }
 };
+
