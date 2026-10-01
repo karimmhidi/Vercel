@@ -511,7 +511,7 @@ const liveDotLabel = document.getElementById('liveDotLabel');
 // =================================================================================
 // LIVE DATA LAYER — Sage 300 Web API, via the secure Netlify Function "sage-proxy".
 // The frontend never talks to Sage 300 directly (credentials stay server-side); it
-// only calls /api/sage-proxy?company=<CODE>&type=customers|national.
+// only calls /api/sage-proxy?company=<CODE>&type=customers.
 // =================================================================================
 const PROXY_URL = '/api/sage-proxy';
 
@@ -532,14 +532,11 @@ const FALLBACK_COMPANIES = [
   {code:'SNDATA', name:"OLA Energy Sénégal"},
   {code:'TDDATA', name:"OLA Energy Chad S.A."},
   {code:'UGDATA', name:"OLA Energy Uganda Limited"},
-  {code:'ERODAT', name:"Libya Oil Eritrea"},
-  {code:'ERTDAT', name:"Tamoil Malindi (Eritrea)"},
-  {code:'SDDATA', name:"Libya Oil Sudan Company Ltd."},
 ];
 
 let COMPANIES = [];               // [{code, name}], populated from the proxy or the fallback above
 let AFFILIATE_NAMES = {};         // code -> display name, for table/CSV rendering
-let affiliatesLoaded = {};        // code -> { customers:n, national:n, error:string|null }
+let affiliatesLoaded = {};        // code -> { customers:n, error:string|null }
 
 async function loadCompanyList(){
   try{
@@ -614,10 +611,10 @@ function loadFromCache(code){
   }
 }
 
-function saveToCache(code, customers, national, nationalError){
+function saveToCache(code, customers){
   try{
     localStorage.setItem(CACHE_PREFIX + code, JSON.stringify({
-      ts: Date.now(), customers, national, nationalError: nationalError || null,
+      ts: Date.now(), customers,
     }));
   }catch(err){
     // Storage full or unavailable (private browsing, etc.) — just skip caching silently.
@@ -649,12 +646,12 @@ async function loadFromSharedCache(code){
   }
 }
 
-async function saveToSharedCache(code, customers, national, nationalError){
+async function saveToSharedCache(code, customers){
   try{
     await fetch(`${SHARED_CACHE_URL}?company=${encodeURIComponent(code)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customers, national, nationalError: nationalError || null }),
+      body: JSON.stringify({ customers }),
     });
   }catch(err){
     // Non-fatal — the data is still shown locally, it just won't be shared today.
@@ -743,22 +740,6 @@ function mapCustomerRow(row, code){
   };
 }
 
-function mapNationalRow(row, code){
-  const id = String(apiVal(row, ['NationalAccountNumber','IDNATACCT']) || '').trim();
-  if(!id) return null;
-  const custcc = extractOptField(row.NationalAccountOptionalFieldValues, 'CUSTCC');
-  const location = extractOptField(row.NationalAccountOptionalFieldValues, 'LOCATION');
-  return {
-    id,
-    name: apiVal(row, ['NationalAccountName','NAMEACCT']) || '',
-    active: isActiveStatus(apiVal(row, ['Status'])),
-    onHold: isOnHold(apiVal(row, ['OnHold'])),
-    custcc: custcc.value, custccDesc: custcc.desc,
-    location: location.value, locationDesc: location.desc,
-    type: 'National account', source: code
-  };
-}
-
 // The proxy returns ONE page per call (to stay well under any function timeout) plus
 // a "nextLink" when there's more — so a big affiliate (thousands of accounts) is
 // fetched as a sequence of small, fast calls instead of one huge one.
@@ -797,7 +778,7 @@ async function fetchAffiliate(code, forceRefresh, onLiveRows){
   if(!forceRefresh){
     const cached = loadFromCache(code);
     if(cached){
-      return { code, customers: cached.customers, national: cached.national, error: null, nationalError: cached.nationalError, fromCache: true };
+      return { code, customers: cached.customers, error: null, fromCache: true };
     }
 
     // No local (browser) cache hit — check the shared cache before paying Sage's
@@ -805,12 +786,12 @@ async function fetchAffiliate(code, forceRefresh, onLiveRows){
     // today, we get their result instantly.
     const shared = await loadFromSharedCache(code);
     if(shared){
-      saveToCache(code, shared.customers, shared.national, shared.nationalError); // warm the local cache too
-      return { code, customers: shared.customers, national: shared.national, error: null, nationalError: shared.nationalError || null, fromCache: true, fromSharedCache: true };
+      saveToCache(code, shared.customers); // warm the local cache too
+      return { code, customers: shared.customers, error: null, fromCache: true, fromSharedCache: true };
     }
   }
 
-  const result = { code, customers: [], national: [], error: null, nationalError: null, fromCache: false };
+  const result = { code, customers: [], error: null, fromCache: false };
   try{
     const custRows = await fetchAllPagesViaProxy(code, 'customers', (pageRows, n) => {
       loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… ${n} customer accounts so far`;
@@ -823,28 +804,11 @@ async function fetchAffiliate(code, forceRefresh, onLiveRows){
     if(!onLiveRows) result.customers = custRows.map(r => mapCustomerRow(r, code)).filter(Boolean);
   }catch(err){
     result.error = String(err.message || err);
-    return result; // customers is the core data — if that fails, the affiliate failed
+    return result;
   }
 
-  // National accounts is treated as optional/best-effort: a failure here (e.g. no
-  // access, or an unsupported field) doesn't discard the customer data we already
-  // have — it just means this affiliate has no national-account records for now.
-  try{
-    const natRows = await fetchAllPagesViaProxy(code, 'national', (pageRows, n) => {
-      loadStatus.textContent = `Loading ${AFFILIATE_NAMES[code] || code}… ${n} national accounts so far`;
-      if(onLiveRows && pageRows.length){
-        const mapped = pageRows.map(r => mapNationalRow(r, code)).filter(Boolean);
-        result.national = result.national.concat(mapped);
-        onLiveRows('national', mapped);
-      }
-    });
-    if(!onLiveRows) result.national = natRows.map(r => mapNationalRow(r, code)).filter(Boolean);
-  }catch(err){
-    result.nationalError = String(err.message || err);
-  }
-
-  saveToCache(code, result.customers, result.national, result.nationalError);
-  saveToSharedCache(code, result.customers, result.national, result.nationalError); // write-through so the rest of the day is instant for everyone
+  saveToCache(code, result.customers);
+  saveToSharedCache(code, result.customers); // write-through so the rest of the day is instant for everyone
   return result;
 }
 
@@ -878,33 +842,30 @@ async function loadSelectedAffiliates(codes, forceRefresh){
       // Clear out any previous rows for this affiliate before a live fetch starts
       // streaming new ones in (cache hits below merge their whole result at once).
       allRecords = allRecords.filter(rec => rec.source !== code);
-      affiliatesLoaded[code] = { customers:0, national:0, error:null, nationalError:null, fromCache:false, streaming:true };
+      affiliatesLoaded[code] = { customers:0, error:null, fromCache:false, streaming:true };
 
       // Sage can be slow — rather than stare at a spinner, show each page of
       // customer accounts in the results table the moment it arrives.
       const r = await fetchAffiliate(code, forceRefresh, (type, mappedRows) => {
         allRecords = allRecords.concat(mappedRows);
         const info = affiliatesLoaded[code];
-        if(info){
-          if(type === 'customers') info.customers += mappedRows.length;
-          else info.national += mappedRows.length;
-        }
+        if(info) info.customers += mappedRows.length;
         renderAffChips();
         renderStatbar();
         runSearch();
       });
 
       if(r.error){
-        affiliatesLoaded[code] = { customers:0, national:0, error:r.error, nationalError:null, fromCache:false };
+        affiliatesLoaded[code] = { customers:0, error:r.error, fromCache:false };
       }else if(r.fromCache){
         // Cache hit (local or shared) — nothing was streamed page by page, so merge
         // the whole result now.
-        allRecords = allRecords.concat(r.customers, r.national);
-        affiliatesLoaded[code] = { customers:r.customers.length, national:r.national.length, error:null, nationalError:r.nationalError, fromCache:true, fromSharedCache:r.fromSharedCache };
+        allRecords = allRecords.concat(r.customers);
+        affiliatesLoaded[code] = { customers:r.customers.length, error:null, fromCache:true, fromSharedCache:r.fromSharedCache };
       }else{
         // Live fetch — rows were already streamed into allRecords above; just lock
-        // in the final counts (e.g. in case national accounts failed).
-        affiliatesLoaded[code] = { customers:r.customers.length, national:r.national.length, error:null, nationalError:r.nationalError, fromCache:false };
+        // in the final count.
+        affiliatesLoaded[code] = { customers:r.customers.length, error:null, fromCache:false };
       }
       done++;
       loadProgressFill.style.width = Math.round(done / codes.length * 100) + '%';
@@ -953,9 +914,7 @@ function renderAffChips(){
       : info.fromCache ? ' <span class="tag" title="Loaded from local cache instead of Sage">cached</span>' : '';
     chip.innerHTML = info.error
       ? `<span title="${info.error}">${label}</span><span class="cnt" style="color:var(--red);">⚠ error</span>`
-      : info.nationalError
-        ? `<span title="National accounts unavailable: ${info.nationalError}">${label}${cacheTag}</span><span class="cnt" style="color:var(--amber);">${info.customers} accounts (no national)</span>`
-        : `<span>${label}${cacheTag}</span><span class="cnt">${info.customers + info.national} accounts</span>`;
+      : `<span>${label}${cacheTag}</span><span class="cnt">${info.customers} accounts</span>`;
     const btn = document.createElement('button');
     btn.textContent = '✕';
     btn.onclick = () => {
@@ -976,14 +935,10 @@ function renderStatbar(){
   if(!allRecords.length){ statbar.style.display = 'none'; statbar.innerHTML=''; return; }
   const total = allRecords.length;
   const active = allRecords.filter(r => r.active).length;
-  const national = allRecords.filter(r => r.type === 'National account').length;
-  const customers = total - national;
   statbar.style.display = 'flex';
   statbar.innerHTML = `
     <div class="statpill"><div class="n">${total}</div><div class="l">Accounts loaded</div></div>
     <div class="statpill"><div class="n">${active}</div><div class="l">Active</div></div>
-    <div class="statpill"><div class="n">${customers}</div><div class="l">Customer accounts</div></div>
-    <div class="statpill"><div class="n">${national}</div><div class="l">National accounts</div></div>
   `;
 }
 
@@ -1054,7 +1009,7 @@ const FIELD_OPTIONS = [
   {v:'id', l:'Account number'},
   {v:'custcc', l:'CUSTCC'},
   {v:'location', l:'Location'},
-  {v:'type', l:'Type (customer / national)'},
+  {v:'type', l:'Type'},
   {v:'onhold', l:'On hold (yes/no)'},
   {v:'nationalaccount', l:'National account'},
 ];
