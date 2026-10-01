@@ -4,7 +4,10 @@
 //
 // Called by the frontend as:
 //   /api/sage-proxy?company=LTN001&type=customers
-//   /api/sage-proxy?company=LTN001&type=national
+//
+// (National accounts (ARNationalAccounts) support was removed — it never had
+// reliable field names and was costing an extra, often-failing round-trip per
+// affiliate on every load.)
 //
 // Add each affiliate's Sage company code to COMPANY_CODES below as you learn it.
 
@@ -50,7 +53,6 @@ const COMPANY_NAMES = {
 };
 
 const CUSTOMER_SELECT = 'CustomerNumber,GroupCode,NationalAccount,Status,OnHold,CustomerName,CreditLimit,CustomerOptionalFieldValues';
-const NATIONAL_SELECT = 'NationalAccountNumber,GroupCode,Status,OnHold,NationalAccountName,NationalAccountOptionalFieldValues';
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
@@ -131,7 +133,7 @@ module.exports = async (req, res) => {
   }
 
   const affiliateCode = String(params.company || '').toUpperCase();
-  const type = String(params.type || 'customers').toLowerCase();
+  const type = 'customers'; // national accounts support removed
   const auth = Buffer.from(`${user}:${pass}`).toString('base64');
 
   // A big affiliate (thousands of customers) has many OData pages. Fetching all of
@@ -155,11 +157,13 @@ module.exports = async (req, res) => {
       res.status(400).json({ error: `Unknown affiliate code "${affiliateCode}". Add it to COMPANY_CODES in sage-proxy.js.` });
       return;
     }
-    const select = type === 'national' ? NATIONAL_SELECT : CUSTOMER_SELECT;
-    const entity = type === 'national' ? 'ARNationalAccounts' : 'ARCustomers';
+    const select = CUSTOMER_SELECT;
+    const entity = 'ARCustomers';
     // $top asks Sage for a bigger page per request — Sage's own server-side cap may
     // still apply, but when it doesn't this cuts the number of slow round-trips a lot.
-    targetUrl = `${BASE_URL}/-/${companyId}/AR/${entity}?$select=${encodeURIComponent(select)}&$top=1000`;
+    // (Reverted from 1000 back to 500 — raising it broke every affiliate with a 502,
+    // so Sage is likely rejecting or choking on the larger page size.)
+    targetUrl = `${BASE_URL}/-/${companyId}/AR/${entity}?$select=${encodeURIComponent(select)}&$top=500`;
   }
 
   try{
@@ -175,4 +179,3 @@ module.exports = async (req, res) => {
     res.status(502).json({ error: String(err.message || err) });
   }
 };
-
