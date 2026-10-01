@@ -52,7 +52,7 @@ const COMPANY_NAMES = {
   UGDATA: "OLA Energy Uganda Limited",
 };
 
-const CUSTOMER_SELECT = 'CustomerNumber,GroupCode,NationalAccount,Status,OnHold,CustomerName,CreditLimit,CustomerOptionalFieldValues';
+const CUSTOMER_SELECT = 'CustomerNumber,GroupCode,NationalAccount,Status,OnHold,CustomerName,CustomerOptionalFieldValues';
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
