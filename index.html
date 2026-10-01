@@ -731,11 +731,6 @@ function mapCustomerRow(row, code){
     location: location.value || (apiVal(row,['Location']) != null ? String(apiVal(row,['Location'])) : null),
     locationDesc: location.desc,
     nationalAccount: (apiVal(row, ['NationalAccount']) || '').toString().trim() || null,
-    creditLimit: (() => {
-      const v = apiVal(row, ['CreditLimit', 'CREDITLIMIT']);
-      const n = v != null ? Number(v) : NaN;
-      return Number.isFinite(n) ? n : null;
-    })(),
     type: 'Customer', source: code
   };
 }
@@ -1139,7 +1134,7 @@ function runSearch(){
   exportBtn.style.display = 'inline-block';
 
   let html = `<table><thead><tr>
-    <th>Account</th><th>Name</th><th>Status</th><th>Type</th><th>CUSTCC</th><th>Location</th><th>National account</th><th>Credit limit</th><th>Affiliate</th>
+    <th>Account</th><th>Name</th><th>Status</th><th>Type</th><th>CUSTCC</th><th>Location</th><th>National account</th><th>Affiliate</th>
   </tr></thead><tbody>`;
   results.forEach(r => {
     const isNat = r.type === 'National account';
@@ -1151,7 +1146,6 @@ function runSearch(){
       <td>${r.custccDesc ? r.custccDesc + (r.custcc && r.custcc!==r.custccDesc ? ' <span class="tag mono">'+r.custcc+'</span>' : '') : (r.custcc || '—')}</td>
       <td>${r.locationDesc ? r.locationDesc + (r.location && r.location!==r.locationDesc ? ' <span class="tag mono">'+r.location+'</span>' : '') : (r.location || '—')}</td>
       <td class="mono">${r.nationalAccount || '—'}</td>
-      <td class="mono">${r.creditLimit != null ? r.creditLimit.toLocaleString() : '—'}</td>
       <td class="mono" style="font-size:11px; color:var(--text-mut);">${AFFILIATE_NAMES[r.source] || r.source}</td>
     </tr>`;
   });
@@ -1171,7 +1165,7 @@ function csvEscape(val){
 
 function exportCSV(){
   if(!lastResults.length) return;
-  const headers = ['Account','Name','Status','On Hold','Type','CUSTCC','Location','National Account','Credit Limit','Affiliate'];
+  const headers = ['Account','Name','Status','On Hold','Type','CUSTCC','Location','National Account','Affiliate'];
   const rows = lastResults.map(r => [
     r.id,
     r.name || '',
@@ -1181,7 +1175,6 @@ function exportCSV(){
     r.custccDesc || r.custcc || '',
     r.locationDesc || r.location || '',
     r.nationalAccount || '',
-    r.creditLimit != null ? r.creditLimit : '',
     AFFILIATE_NAMES[r.source] || r.source
   ]);
   const csv = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\r\n');
