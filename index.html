@@ -773,6 +773,14 @@ async function fetchAllPagesViaProxy(code, type, onPage){
     rows = rows.concat(newRows);
     if(onPage && newRows.length) onPage(newRows, rows.length);
 
+    // DIAGNOSTIC — this pagination has misbehaved before in ways that were hard to
+    // explain from a single raw link test. Logging exactly what each page looked
+    // like (the cursor we sent, how many rows came back, how many were genuinely
+    // new, and the first/last account number in the page) makes it visible in the
+    // browser console so we can actually see what Sage is doing across pages,
+    // instead of guessing. Safe to remove once pagination is confirmed solid.
+    console.log(`[${code}/${type}] page ${guard}: sent after="${after}" | got ${rawPage.length} raw, ${newRows.length} new | first=${rawPage[0] && (rawPage[0].CustomerNumber ?? rawPage[0].IDCUST)} last=${rawPage[rawPage.length-1] && (rawPage[rawPage.length-1].CustomerNumber ?? rawPage[rawPage.length-1].IDCUST)} | running total=${rows.length}`);
+
     next = json.nextLink || null;
     if(next) continue; // Sage told us exactly where the next page is — use it
 

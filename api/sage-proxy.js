@@ -52,15 +52,15 @@ const COMPANY_NAMES = {
   UGDATA: "OLA Energy Uganda Limited",
 };
 
-// IMPORTANT: CustomerOptionalFieldValues (which carries CUSTCC/LOCATION) is a
-// collection — it must be pulled in via $expand, NOT listed inside $select. Selecting
-// a collection property directly made this particular Sage OData service do a
-// join-style multiplication: one raw row per (customer × optional field) pair instead
-// of one row per customer, which is why affiliates were coming back with 10x+ more
-// "customers" than actually exist (e.g. 12,000 raw rows for ~1,088 real customers).
-// $expand is the correct OData way to bring in a related collection without that.
-const CUSTOMER_SELECT = 'CustomerNumber,GroupCode,NationalAccount,Status,OnHold,CustomerName';
-const CUSTOMER_EXPAND = 'CustomerOptionalFieldValues';
+// (Tried pulling CustomerOptionalFieldValues via $expand instead of $select, on the
+// theory that $select-ing a collection was causing row duplication — but Sage
+// rejects $expand on this field outright ("not a navigation property"), so that
+// theory was wrong. Back to $select, which is what this API actually supports for
+// this field — real sample data shows it comes back correctly nested, one row per
+// customer, no duplication. The real cause of the inflated counts is still open —
+// see fetchAllPagesViaProxy in index.html for the diagnostic logging added to
+// actually find it instead of guessing again.)
+const CUSTOMER_SELECT = 'CustomerNumber,GroupCode,NationalAccount,Status,OnHold,CustomerName,CustomerOptionalFieldValues';
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
@@ -175,7 +175,7 @@ module.exports = async (req, res) => {
       const afterVal = String(params.after).replace(/'/g, "''");
       filterStr = `&$filter=${encodeURIComponent(`CustomerNumber gt '${afterVal}'`)}`;
     }
-    targetUrl = `${BASE_URL}/-/${companyId}/AR/${entity}?$select=${encodeURIComponent(CUSTOMER_SELECT)}&$expand=${encodeURIComponent(CUSTOMER_EXPAND)}&$orderby=CustomerNumber&$top=${PAGE_SIZE}${filterStr}`;
+    targetUrl = `${BASE_URL}/-/${companyId}/AR/${entity}?$select=${encodeURIComponent(CUSTOMER_SELECT)}&$orderby=CustomerNumber&$top=${PAGE_SIZE}${filterStr}`;
   }
 
   try{
