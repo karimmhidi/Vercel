@@ -52,7 +52,15 @@ const COMPANY_NAMES = {
   UGDATA: "OLA Energy Uganda Limited",
 };
 
-const CUSTOMER_SELECT = 'CustomerNumber,GroupCode,NationalAccount,Status,OnHold,CustomerName,CustomerOptionalFieldValues';
+// IMPORTANT: CustomerOptionalFieldValues (which carries CUSTCC/LOCATION) is a
+// collection — it must be pulled in via $expand, NOT listed inside $select. Selecting
+// a collection property directly made this particular Sage OData service do a
+// join-style multiplication: one raw row per (customer × optional field) pair instead
+// of one row per customer, which is why affiliates were coming back with 10x+ more
+// "customers" than actually exist (e.g. 12,000 raw rows for ~1,088 real customers).
+// $expand is the correct OData way to bring in a related collection without that.
+const CUSTOMER_SELECT = 'CustomerNumber,GroupCode,NationalAccount,Status,OnHold,CustomerName';
+const CUSTOMER_EXPAND = 'CustomerOptionalFieldValues';
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
@@ -62,7 +70,7 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 // timeout instead of a clean, retryable error. So every attempt gets its own
 // deadline — set generously here since Vercel allows much longer function
 // execution than Netlify's free tier does.
-async function fetchWithTimeout(url, auth, timeoutMs = 55000){
+async function fetchWithTimeout(url, auth, timeoutMs = 58000){
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try{
@@ -136,11 +144,13 @@ module.exports = async (req, res) => {
   const type = 'customers'; // national accounts support removed
   const auth = Buffer.from(`${user}:${pass}`).toString('base64');
 
-  // A big affiliate (thousands of customers) has many OData pages. Fetching all of
-  // them inside one call can take longer than the platform allows. So each call
-  // fetches ONE page only, and returns Sage's own "next page" link — the frontend
-  // calls back with ?next=<that link> to get the following page, looping until
-  // there's no next link left.
+  // Confirmed: this Sage server hard-caps results at 500 per request no matter what
+  // $top is set to (tried 1000 and 20000 — still only 500 came back each time), so
+  // a single "get everything in one shot" call isn't possible here. Real pagination
+  // is required — but now that the row-multiplication bug above is fixed, the
+  // "after" cursor below will actually walk through distinct customers correctly
+  // instead of getting stuck.
+  const PAGE_SIZE = 500;
   let targetUrl;
   if(params.next){
     try{ targetUrl = decodeURIComponent(String(params.next)); }catch(e){
@@ -157,13 +167,15 @@ module.exports = async (req, res) => {
       res.status(400).json({ error: `Unknown affiliate code "${affiliateCode}". Add it to COMPANY_CODES in sage-proxy.js.` });
       return;
     }
-    const select = CUSTOMER_SELECT;
     const entity = 'ARCustomers';
-    // $top asks Sage for a bigger page per request — Sage's own server-side cap may
-    // still apply, but when it doesn't this cuts the number of slow round-trips a lot.
-    // (Reverted from 1000 back to 500 — raising it broke every affiliate with a 502,
-    // so Sage is likely rejecting or choking on the larger page size.)
-    targetUrl = `${BASE_URL}/-/${companyId}/AR/${entity}?$select=${encodeURIComponent(select)}&$top=500`;
+    let filterStr = '';
+    if(params.after){
+      // Escape single quotes the OData way (doubled), per the OData literal syntax.
+      // This is how the frontend asks for the next page: "accounts after this one".
+      const afterVal = String(params.after).replace(/'/g, "''");
+      filterStr = `&$filter=${encodeURIComponent(`CustomerNumber gt '${afterVal}'`)}`;
+    }
+    targetUrl = `${BASE_URL}/-/${companyId}/AR/${entity}?$select=${encodeURIComponent(CUSTOMER_SELECT)}&$expand=${encodeURIComponent(CUSTOMER_EXPAND)}&$orderby=CustomerNumber&$top=${PAGE_SIZE}${filterStr}`;
   }
 
   try{
@@ -171,6 +183,7 @@ module.exports = async (req, res) => {
     const records = json.value || [];
     res.status(200).json({
       company: affiliateCode, type,
+      pageSize: PAGE_SIZE,
       count: records.length,
       records,
       nextLink: json['@odata.nextLink'] || null,
