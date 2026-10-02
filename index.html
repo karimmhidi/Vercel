@@ -744,29 +744,46 @@ function mapCustomerRow(row, code){
 // makes the app feel responsive even when a full affiliate takes a while).
 async function fetchAllPagesViaProxy(code, type, onPage){
   let rows = [];
-  let next = null;   // Sage's own nextLink, when it sends one
-  let skip = 0;       // fallback offset, used when Sage DOESN'T send a nextLink
+  let next = null;     // Sage's own nextLink, when it sends one
+  let after = null;    // keyset cursor — "CustomerNumber greater than this" — used otherwise
+  const seenIds = new Set(); // safety net: this Sage instance has been seen returning
+                              // overlapping/duplicate pages, so never trust a page blindly
   let guard = 0;
   while(guard++ < 500){
     const url = next
       ? `${PROXY_URL}?next=${encodeURIComponent(next)}`
-      : `${PROXY_URL}?company=${encodeURIComponent(code)}&type=${type}&skip=${skip}`;
+      : `${PROXY_URL}?company=${encodeURIComponent(code)}&type=${type}${after ? `&after=${encodeURIComponent(after)}` : ''}`;
     const res = await fetch(url, {cache:'no-store'});
     const json = await res.json().catch(() => ({}));
     if(!res.ok) throw new Error(json.error || `${type} request failed (${res.status})`);
-    const pageRows = json.records || [];
-    rows = rows.concat(pageRows);
-    if(onPage) onPage(pageRows, rows.length);
+    const rawPage = json.records || [];
+
+    // De-dupe against everything seen so far (by CustomerNumber) before counting
+    // this page as progress — protects against a server that repeats data instead
+    // of truly advancing.
+    const newRows = rawPage.filter(r => {
+      const id = r && (r.CustomerNumber ?? r.IDCUST ?? r.NationalAccountNumber);
+      if(id == null) return true; // can't dedupe this one, just keep it
+      const key = String(id);
+      if(seenIds.has(key)) return false;
+      seenIds.add(key);
+      return true;
+    });
+
+    rows = rows.concat(newRows);
+    if(onPage && newRows.length) onPage(newRows, rows.length);
 
     next = json.nextLink || null;
     if(next) continue; // Sage told us exactly where the next page is — use it
 
-    // No nextLink from Sage. This Sage instance has been observed NOT sending one
-    // even when more records exist, so don't treat "no nextLink" as "no more data" —
-    // only a page shorter than a full page size reliably means we've reached the end.
-    const pageSize = json.pageSize || pageRows.length;
-    if(pageRows.length < pageSize || pageRows.length === 0) break;
-    skip += pageRows.length;
+    const pageSize = json.pageSize || rawPage.length;
+    // Stop when: the page was short (true end of data), empty, or — the real
+    // safety net — entirely made of rows we'd already seen (server not advancing).
+    if(rawPage.length < pageSize || rawPage.length === 0 || newRows.length === 0) break;
+
+    const lastRaw = rawPage[rawPage.length - 1];
+    after = lastRaw && (lastRaw.CustomerNumber ?? lastRaw.IDCUST ?? null);
+    if(!after) break; // no cursor field to advance by — stop rather than loop forever
   }
   return rows;
 }
